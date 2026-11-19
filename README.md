@@ -1,3 +1,11 @@
+> [!IMPORTANT]
+> **This is a fork** of [WilliamJohnDavisIII/omarchy-sundown](https://github.com/WilliamJohnDavisIII/omarchy-sundown). It adds two changes, both offered upstream:
+>
+> - [#1](https://github.com/WilliamJohnDavisIII/omarchy-sundown/pull/1): the extra-warm shader script runs only while that shader is on, not on every 15-second check (about 29,000 fewer processes a day).
+> - [#2](https://github.com/WilliamJohnDavisIII/omarchy-sundown/pull/2): the mildest temperature is 5500K instead of 4500K.
+>
+> Install this fork with `omarchy plugin add https://github.com/cwilliams5/omarchy-sundown.git --enable`. Once both are merged, use the original instead.
+
 # Sundown
 
 A night light for [Omarchy](https://omarchy.org) that follows the sun. It warms the screen at sunset and clears it at sunrise, with a temperature slider and a custom schedule if you'd rather pick the hours.
