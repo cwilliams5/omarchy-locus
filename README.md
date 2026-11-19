@@ -61,7 +61,7 @@ omarchy-shell $ID status
 omarchy-shell $ID on
 omarchy-shell $ID off
 omarchy-shell $ID toggle
-omarchy-shell $ID set 3000              # Save a temperature, from 500 to 4500
+omarchy-shell $ID set 3000              # Save a temperature, from 500 to 5500
 omarchy-shell $ID schedule sun          # Or manual, or custom
 omarchy-shell $ID hours 21:00 07:00     # Custom on and off times
 omarchy-shell $ID location "52.52, 13.40"

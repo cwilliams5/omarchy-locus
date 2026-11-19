@@ -4,7 +4,10 @@
 var MIN_TEMP = 500
 var HYPRSUNSET_MIN = 1000 // hyprsunset refuses anything lower
 var EXTRA_STEPS = 10 // Shader strengths below HYPRSUNSET_MIN
-var MAX_TEMP = 4500
+// The mildest setting. Kept below FRESH_TEMP, which is how a restarted hyprsunset
+// is recognized, and below the 6000K line that this plugin and
+// omarchy-toggle-nightlight both read as off.
+var MAX_TEMP = 5500
 var OFF_TEMP = 6500 // Reported while off, matching omarchy-toggle-nightlight
 var FRESH_TEMP = 6000 // hyprsunset's default; only ever reported right after it starts
 var DAY_MS = 86400000

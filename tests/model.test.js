@@ -315,6 +315,17 @@ test("below 1000K hyprsunset stays at its floor and the shader takes over", () =
   assert.strictEqual(Model.normalizeSettings({ temperature: 600 }).temperature, 600)
 })
 
+test("the mildest temperature stays clear of hyprsunset's just-started value", () => {
+  assert.ok(Model.MAX_TEMP < Model.FRESH_TEMP, "a saved temperature must never look like a restart")
+  assert.strictEqual(Model.normalizeSettings({ temperature: Model.MAX_TEMP }).temperature, Model.MAX_TEMP)
+  const s = settings({ mode: "custom", onTime: "21:00", offTime: "07:00", temperature: Model.MAX_TEMP })
+  for (let minute = 0; minute <= 60; minute++) {
+    const kelvin = Model.kelvinAt(s, place, at(2026, 11, 5, 21, minute))
+    assert.notStrictEqual(kelvin, Model.FRESH_TEMP, "ramp at 21:" + minute)
+    assert.ok(kelvin >= Model.MAX_TEMP && kelvin <= Model.OFF_TEMP, "ramp at 21:" + minute)
+  }
+})
+
 if (process.env.SUN_FIXTURE) {
   test("sun times match the reference list within a second", () => {
     const fixture = JSON.parse(fs.readFileSync(process.env.SUN_FIXTURE, "utf8"))

@@ -23,7 +23,7 @@ Panel {
   readonly property bool serviceReady: service !== null && service !== undefined
 
   readonly property int minTemp: serviceReady ? service.minTemp : 500
-  readonly property int maxTemp: serviceReady ? service.maxTemp : 4500
+  readonly property int maxTemp: serviceReady ? service.maxTemp : 5500
   readonly property bool nightOn: serviceReady && service.nightOn
   readonly property bool switchOn: serviceReady && service.switchOn
   readonly property bool previewing: serviceReady && service.previewing
