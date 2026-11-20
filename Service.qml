@@ -175,8 +175,10 @@ Item {
   readonly property bool dim: settings.dim
   readonly property string dimFrom: settings.dimFrom
   readonly property int dimPercent: settings.dimPercent
+  // Following a schedule, rather than the switch alone.
+  readonly property bool scheduled: mode !== "manual" && !(mode === "sun" && location === null)
   // "Off until morning" needs a schedule to know when morning is.
-  readonly property bool canHoldUntilMorning: mode !== "manual" && !(mode === "sun" && location === null)
+  readonly property bool canHoldUntilMorning: scheduled
 
   onPausedNowChanged: tick()
   onPanelOpenChanged: tick()
@@ -411,6 +413,15 @@ Item {
     lastLevel = currentLevel()
     apply(lastLevel)
   }
+
+  // For the panel's 24-hour view: where it starts, and what the schedule does
+  // across it (Model.daySamples). Worked out only while the panel is open.
+  function dayView(nowMs, stepMs, count) {
+    var from = Model.viewStart(nowMs)
+    return { from: from, stepMs: stepMs, samples: Model.daySamples(settings, location, from, stepMs, count) }
+  }
+
+  function viewPaint(sample) { return Model.viewPaint(sample, settings.temperature) }
 
   function currentLevel() {
     return Model.kelvinAt(settings, location, Date.now(), pausedNow)

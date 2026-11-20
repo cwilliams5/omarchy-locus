@@ -1249,3 +1249,60 @@ test("nothing due is ever in the past, with dimming too", () => {
     }
   }
 })
+
+// ---- The 24-hour view ---------------------------------------------------------------
+
+test("the view's colours run from white to red as the temperature drops", () => {
+  const white = Model.kelvinColor(Model.OFF_TEMP)
+  assert.ok(white.r === 1 && white.g > 0.97 && white.b > 0.95, JSON.stringify(white))
+  let previous = null
+  for (const kelvin of [6500, 5000, 4000, 3000, 2200, 1500, 1000, 750, 500]) {
+    const c = Model.kelvinColor(kelvin)
+    for (const channel of ["r", "g", "b"]) assert.ok(c[channel] >= 0 && c[channel] <= 1)
+    assert.strictEqual(c.r, 1, kelvin + "K keeps full red")
+    if (previous) assert.ok(c.g <= previous.g && c.b <= previous.b, kelvin + "K is no bluer or greener than the one before")
+    previous = c
+  }
+  assert.strictEqual(Model.kelvinColor(500).g, 0, "only red at the shader's end")
+  assert.strictEqual(Model.kelvinColor(1500).b, 0)
+})
+
+test("the view's strength grows with the tint and is full at the night's temperature", () => {
+  assert.strictEqual(Model.viewStrength(Model.OFF_TEMP, 3000), 0)
+  assert.strictEqual(Model.viewStrength(3000, 3000), 1)
+  assert.strictEqual(Model.viewStrength(2200, 3000), 1)
+  const half = Model.viewStrength(1000000 / ((1000000 / 6500 + 1000000 / 3000) / 2), 3000)
+  assert.ok(Math.abs(half - 0.5) < 1e-9, "even to the eye: " + half)
+  assert.ok(Model.viewStrength(5000, 3000) < 0.3, "Movie mode shows faint")
+})
+
+test("the view runs noon to noon around the night", () => {
+  assert.strictEqual(Model.viewStart(at(2026, 11, 5, 15)), at(2026, 11, 5, 12))
+  assert.strictEqual(Model.viewStart(at(2026, 11, 6, 2)), at(2026, 11, 5, 12))
+  assert.strictEqual(Model.viewStart(at(2026, 11, 5, 12)), at(2026, 11, 5, 12))
+  const s = settings({ mode: "custom", onTime: "21:00", offTime: "07:00", temperature: 3000, bedtime: true, dim: true })
+  const from = at(2026, 11, 5, 12)
+  const samples = Model.daySamples(s, place, from, 5 * MIN, 288)
+  assert.strictEqual(samples.length, 288)
+  const sampleAt = (h, m) => samples[Math.round((at(2026, 11, h < 12 ? 6 : 5, h, m) - from) / (5 * MIN))]
+  assert.deepStrictEqual(sampleAt(15, 0), { kelvin: Model.OFF_TEMP, gamma: 100 })
+  assert.ok(sampleAt(21, 30).kelvin < Model.OFF_TEMP && sampleAt(21, 30).kelvin > 3000, "warming up")
+  assert.deepStrictEqual(sampleAt(2, 0), { kelvin: 2200, gamma: 80 }, "bedtime and dimming")
+  assert.deepStrictEqual(sampleAt(8, 0), { kelvin: Model.OFF_TEMP, gamma: 100 })
+  // A hold shows as what will happen: off until it ends.
+  const held = settings(Object.assign({}, s, Model.holdPatch(s, place, at(2026, 11, 5, 15), "morning")))
+  assert.ok(Model.daySamples(held, place, from, 5 * MIN, 288).every((x) => x.kelvin === Model.OFF_TEMP))
+})
+
+test("the view paints fades as a growing tint in the night's colour, darker where dimmed", () => {
+  assert.strictEqual(Model.viewPaint({ kelvin: Model.OFF_TEMP, gamma: 100 }, 3000).a, 0)
+  const night = Model.kelvinColor(3000)
+  for (const kelvin of [6000, 5000, 4000, 3000]) {
+    const paint = Model.viewPaint({ kelvin, gamma: 100 }, 3000)
+    assert.deepStrictEqual([paint.r, paint.g, paint.b], [night.r, night.g, night.b], kelvin + "K: no lighter seam")
+  }
+  const bed = Model.viewPaint({ kelvin: 2200, gamma: 100 }, 3000)
+  assert.ok(bed.g < night.g && bed.a === 1, "bedtime shows deeper")
+  const dimmed = Model.viewPaint({ kelvin: 2200, gamma: 80 }, 3000)
+  assert.ok(Math.abs(dimmed.r - 0.8 * bed.r) < 1e-9 && Math.abs(dimmed.g - 0.8 * bed.g) < 1e-9)
+})

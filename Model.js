@@ -867,6 +867,59 @@ function presetName(kelvin) {
   return ""
 }
 
+// The colour white takes on at a temperature, for drawing: Tanner Helland's
+// fit to the blackbody curve, as 0 to 1 channels. Below 1000K, where the
+// shader takes green away, green fades to none at MIN_TEMP.
+function kelvinColor(kelvin) {
+  var k = Math.max(MIN_TEMP, Math.min(40000, Number(kelvin)))
+  var t = Math.max(HYPRSUNSET_MIN, k) / 100
+  var r = t <= 66 ? 255 : 329.698727446 * Math.pow(t - 60, -0.1332047592)
+  var g = t <= 66 ? 99.4708025861 * Math.log(t) - 161.1195681661 : 288.1221695283 * Math.pow(t - 60, -0.0755148492)
+  var b = t >= 66 ? 255 : (t <= 19 ? 0 : 138.5177312231 * Math.log(t - 10) - 305.0447927307)
+  if (k < HYPRSUNSET_MIN) g *= (k - MIN_TEMP) / (HYPRSUNSET_MIN - MIN_TEMP)
+  var channel = function(value) { return Math.max(0, Math.min(255, value)) / 255 }
+  return { r: channel(r), g: channel(g), b: channel(b) }
+}
+
+// How strongly the 24-hour view shows a temperature, from 0 (off) to 1 (the
+// night's own temperature, or warmer), so a fade shows as a tint growing
+// evenly to the eye.
+function viewStrength(kelvin, nightKelvin) {
+  var span = mireds(nightKelvin) - mireds(OFF_TEMP)
+  if (!(span > 0)) return kelvin === OFF_TEMP ? 0 : 1
+  return Math.max(0, Math.min(1, (mireds(kelvin) - mireds(OFF_TEMP)) / span))
+}
+
+// How the view paints one sample, as 0 to 1 channels and alpha: in the
+// night's colour (nightKelvin, the saved temperature) or a warmer one
+// (bedtime), as opaque as the tint is strong, darker by any dimming. A fade
+// keeps the night's colour and only grows stronger: drawing its milder
+// temperatures in their own, lighter colours made a bright seam at each end.
+function viewPaint(sample, nightKelvin) {
+  var colour = kelvinColor(Math.min(sample.kelvin, nightKelvin))
+  var light = Math.max(0, Math.min(FULL_GAMMA, sample.gamma)) / FULL_GAMMA
+  return { r: colour.r * light, g: colour.g * light, b: colour.b * light, a: viewStrength(sample.kelvin, nightKelvin) }
+}
+
+// Where the 24-hour view starts: the most recent local noon, so the night sits
+// in the middle.
+function viewStart(nowMs) {
+  var noon = localAt(nowMs, 0, 720)
+  return noon <= nowMs ? noon : localAt(nowMs, -1, 720)
+}
+
+// The day as the panel draws it: `count` samples from fromMs, stepMs apart,
+// each the temperature and gamma the schedule and any hold give then (an app's
+// pause is momentary, so it isn't shown).
+function daySamples(settings, location, fromMs, stepMs, count) {
+  var out = []
+  for (var i = 0; i < count; i++) {
+    var t = fromMs + i * stepMs
+    out.push({ kelvin: kelvinAt(settings, location, t, false), gamma: gammaAt(settings, location, t, false) })
+  }
+  return out
+}
+
 function modePatch(settings, mode, currentlyOn) {
   if (mode === "manual") return { mode: mode, manualOn: currentlyOn, override: null, rampSkipUntil: 0 }
   return { mode: mode, override: null, rampSkipUntil: 0 }
@@ -933,6 +986,11 @@ if (typeof module !== "undefined") {
     modePatch: modePatch,
     holdPatch: holdPatch,
     targetKelvin: targetKelvin,
+    kelvinColor: kelvinColor,
+    viewStrength: viewStrength,
+    viewPaint: viewPaint,
+    viewStart: viewStart,
+    daySamples: daySamples,
     restingKelvin: restingKelvin,
     bedtimeAt: bedtimeAt,
     bedtimeReached: bedtimeReached,

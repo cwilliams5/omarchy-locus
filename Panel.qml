@@ -300,6 +300,141 @@ Panel {
           }
         }
 
+        // The day at a glance, noon to noon: the warm hours and their fades,
+        // bedtime and dimming, and a mark for now. Worked out when the panel
+        // opens or a setting changes; only the mark moves after that.
+        Item {
+          id: dayView
+          width: parent.width
+          visible: root.serviceReady && root.service.scheduled
+          implicitHeight: strip.height + Style.space(4) + dayLabels.height
+
+          readonly property int samples: 288
+          readonly property real stepMs: 300000
+          readonly property real spanMs: samples * stepMs
+          property var view: null
+          property real nowMs: Date.now()
+
+          function refresh() {
+            if (!root.serviceReady || !root.opened || !visible) return
+            nowMs = Date.now()
+            view = root.service.dayView(nowMs, stepMs, samples)
+            strip.requestPaint()
+          }
+
+          function xFor(ms) {
+            return view ? Math.max(0, Math.min(width, (ms - view.from) / spanMs * width)) : 0
+          }
+
+          onVisibleChanged: refresh()
+          onWidthChanged: strip.requestPaint()
+          Component.onCompleted: refresh()
+
+          // Settings can change several times a second (the wheel on a stepper).
+          Timer {
+            id: dayRefresh
+            interval: 150
+            onTriggered: dayView.refresh()
+          }
+
+          Connections {
+            target: root.serviceReady ? root.service : null
+            ignoreUnknownSignals: true
+            function onSettingsChanged() { dayRefresh.restart() }
+            function onLocationChanged() { dayRefresh.restart() }
+          }
+
+          Connections {
+            target: root
+            function onOpenedChanged() { if (root.opened) dayView.refresh() }
+          }
+
+          // Once a minute while the panel is open: move the mark, and start a
+          // new day at noon.
+          Timer {
+            interval: 60000
+            repeat: true
+            running: root.opened && dayView.visible
+            onTriggered: {
+              if (dayView.view && Date.now() - dayView.view.from >= dayView.spanMs) dayView.refresh()
+              else dayView.nowMs = Date.now()
+            }
+          }
+
+          Canvas {
+            id: strip
+            width: parent.width
+            height: Style.space(14)
+            renderStrategy: Canvas.Cooperative
+
+            onPaint: {
+              var ctx = getContext("2d")
+              ctx.reset()
+              var view = dayView.view
+              if (!view || width <= 0) return
+              var radius = height / 2
+              ctx.save()
+              ctx.beginPath()
+              ctx.roundedRect(0, 0, width, height, radius, radius)
+              ctx.clip()
+              ctx.fillStyle = Qt.rgba(root.bar.foreground.r, root.bar.foreground.g, root.bar.foreground.b, 0.12)
+              ctx.fillRect(0, 0, width, height)
+              var slice = width / view.samples.length
+              for (var i = 0; i < view.samples.length; i++) {
+                var paint = root.service.viewPaint(view.samples[i])
+                if (paint.a <= 0) continue
+                ctx.fillStyle = Qt.rgba(paint.r, paint.g, paint.b, paint.a)
+                ctx.fillRect(Math.floor(i * slice), 0, Math.ceil(slice) + 1, height)
+              }
+              ctx.restore()
+            }
+          }
+
+          Rectangle {
+            id: nowMark
+            width: Math.max(2, Style.space(2))
+            height: strip.height + Style.space(4)
+            y: -Style.space(2)
+            radius: width / 2
+            x: Math.max(0, Math.min(dayView.width - width, dayView.xFor(dayView.nowMs) - width / 2))
+            color: root.bar.foreground
+          }
+
+          // 6 PM, midnight and 6 AM, in the panel's clock format.
+          Item {
+            id: dayLabels
+            width: parent.width
+            y: strip.height + Style.space(4)
+            height: captionMetrics.height
+
+            FontMetrics {
+              id: captionMetrics
+              font.family: root.bar.fontFamily
+              font.pixelSize: Style.font.caption
+            }
+
+            Repeater {
+              model: [18, 24, 30]
+
+              delegate: Text {
+                required property int modelData
+                // The clock time itself, so a day the clocks change on still lines up.
+                readonly property real at: {
+                  if (!dayView.view) return 0
+                  var start = new Date(dayView.view.from)
+                  return new Date(start.getFullYear(), start.getMonth(), start.getDate() + Math.floor(modelData / 24), modelData % 24).getTime()
+                }
+                textFormat: Text.PlainText
+                text: root.clockText(at)
+                color: Qt.darker(root.bar.foreground, 1.4)
+                font.family: root.bar.fontFamily
+                font.pixelSize: Style.font.caption
+                x: Math.max(0, Math.min(dayLabels.width - implicitWidth, dayView.xFor(at) - implicitWidth / 2))
+              }
+            }
+          }
+        }
+
         PanelSeparator {
           foreground: root.bar.foreground
         }
