@@ -5,13 +5,13 @@
 #
 # Another screen shader that is already set, like a grayscale one, is kept: its
 # main() is renamed and run first, then the warmth goes on top. A config reload
-# drops the shader, and Sundown runs this again within 15 seconds to put it back.
+# drops the shader, and Locus runs this again within a minute to put it back.
 set -u
 
 step=${1:-0}
 [[ $step =~ ^([0-9]|10)$ ]] || { echo "STEP must be 0 to 10" >&2; exit 2; }
 
-dir="${XDG_RUNTIME_DIR:-/tmp}/sundown"
+dir="${XDG_RUNTIME_DIR:-/tmp}/locus"
 mkdir -p "$dir"
 chmod 700 "$dir"
 
@@ -47,7 +47,7 @@ trap 'rm -f "$tmp"' EXIT
 if [[ -z $base ]]; then
   cat >"$tmp" <<GLSL
 #version 300 es
-// Made by Sundown's warm-shader.sh: hyprsunset at 1000K, then less green and blue.
+// Made by Locus's warm-shader.sh: hyprsunset at 1000K, then less green and blue.
 precision highp float;
 in vec2 v_texcoord;
 uniform sampler2D tex;
@@ -65,12 +65,12 @@ else
   color=${color:-gl_FragColor}
   grep -qE 'void[[:space:]]+main[[:space:]]*\([[:space:]]*(void)?[[:space:]]*\)' "$base" || exit 1
   {
-    sed -E 's/void[[:space:]]+main[[:space:]]*\([[:space:]]*(void)?[[:space:]]*\)/void sundownBase()/' "$base"
+    sed -E 's/void[[:space:]]+main[[:space:]]*\([[:space:]]*(void)?[[:space:]]*\)/void locusBase()/' "$base"
     cat <<GLSL
 
-// Added by Sundown's warm-shader.sh: the shader above, then less green and blue.
+// Added by Locus's warm-shader.sh: the shader above, then less green and blue.
 void main() {
-  sundownBase();
+  locusBase();
   $color.gb *= $keep;
 }
 GLSL

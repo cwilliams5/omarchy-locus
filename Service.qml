@@ -16,7 +16,7 @@ import "Registry.js" as Registry
 // noticed and stays put until the next scheduled change, even in mid-ramp.
 //
 // Every check looks at hyprsunset first and only then decides what to send
-// (step), so nothing Sundown sends can overwrite a change it hasn't seen yet.
+// (step), so nothing Locus sends can overwrite a change it hasn't seen yet.
 // Checks happen when something is due (Model.nextDueAt) and at least once a
 // minute, more often only while the panel is open or hyprsunset is starting.
 Item {
@@ -30,7 +30,10 @@ Item {
   readonly property int previewMilliseconds: 10000
   readonly property string home: Quickshell.env("HOME")
   readonly property string settingsDirectory: home + "/.local/state/omarchy/settings"
-  readonly property string settingsPath: settingsDirectory + "/heliotrope.json"
+  readonly property string settingsPath: settingsDirectory + "/locus.json"
+  // Sundown, which Locus was forked from, kept its settings here. Read once, the
+  // first time Locus runs, so switching over keeps them.
+  readonly property string sundownSettingsPath: settingsDirectory + "/heliotrope.json"
 
   // The icon asks for the panel through here; Panel.qml answers.
   signal panelToggleRequested(var window)
@@ -137,7 +140,7 @@ Item {
   function updateSettings(patch) {
     // Saving before the file has loaded would replace it with the defaults.
     if (!settingsLoaded) {
-      console.warn("io.github.williamjohndavisiii.heliotrope: settings not loaded yet, ignoring change")
+      console.warn("locus: settings not loaded yet, ignoring change")
       return
     }
     var next = {}
@@ -505,7 +508,7 @@ Item {
     try {
       parsed = JSON.parse(text)
     } catch (error) {
-      console.warn("io.github.williamjohndavisiii.heliotrope: ignoring unreadable settings file")
+      console.warn("locus: ignoring unreadable settings file")
     }
     var next = Model.normalizeSettings(parsed)
     var changed = JSON.stringify(next) !== JSON.stringify(settings)
@@ -519,16 +522,18 @@ Item {
 
   // The settings can hold private coordinates, so the file is owner-only before
   // anything is saved to it. Saves replace the file but keep its permissions, and
-  // this also tightens a file made by an earlier version.
+  // this also tightens a file made by an earlier version. With no settings yet,
+  // Sundown's are copied over once, permissions and all.
   Process {
     id: settingsSetup
     running: true
-    command: ["sh", "-c", "mkdir -p \"$1\" && touch \"$2\" && chmod 600 \"$2\"",
-      "heliotrope", root.settingsDirectory, root.settingsPath]
+    command: ["sh", "-c",
+      "mkdir -p \"$1\" && { [ -e \"$2\" ] || [ ! -f \"$3\" ] || cp -p \"$3\" \"$2\"; } && touch \"$2\" && chmod 600 \"$2\"",
+      "locus", root.settingsDirectory, root.settingsPath, root.sundownSettingsPath]
     onExited: function(exitCode) {
       root.settingsSecured = exitCode === 0
       if (!root.settingsSecured)
-        console.warn("io.github.williamjohndavisiii.heliotrope: could not make the settings file private")
+        console.warn("locus: could not make the settings file private")
       root.directoryReady = true
     }
   }
@@ -542,7 +547,7 @@ Item {
     onLoaded: root.loadSettings(text())
     onLoadFailed: function(error) {
       if (error !== FileViewError.FileNotFound) {
-        console.warn("io.github.williamjohndavisiii.heliotrope: could not read settings: " + FileViewError.toString(error))
+        console.warn("locus: could not read settings: " + FileViewError.toString(error))
         return
       }
       // Deleted while running. A plain save would recreate it readable by others.
@@ -702,7 +707,7 @@ Item {
   }
 
   ShellIpc {
-    target: "io.github.williamjohndavisiii.heliotrope.control"
+    target: "io.github.cwilliams5.locus.control"
 
     function status(): string {
       return JSON.stringify({

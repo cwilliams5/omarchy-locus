@@ -10,8 +10,8 @@ import "Registry.js" as Registry
 // the bar, so the dropdown holds still while that icon moves between stacks.
 Panel {
   id: root
-  moduleName: "io.github.williamjohndavisiii.heliotrope"
-  ipcTarget: "io.github.williamjohndavisiii.heliotrope"
+  moduleName: "io.github.cwilliams5.locus"
+  ipcTarget: "io.github.cwilliams5.locus"
 
   readonly property int stepTemp: 100
   readonly property int snapTemp: 50
@@ -50,7 +50,7 @@ Panel {
     running: !root.serviceReady
     repeat: true
     triggeredOnStart: true
-    onTriggered: root.service = (root.bar && root.bar.shell && root.bar.shell.serviceFor("io.github.williamjohndavisiii.heliotrope")) || Registry.service
+    onTriggered: root.service = (root.bar && root.bar.shell && root.bar.shell.serviceFor("io.github.cwilliams5.locus")) || Registry.service
   }
 
   onOpenedChanged: {

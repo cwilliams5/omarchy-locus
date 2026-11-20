@@ -37,7 +37,7 @@ BarIndicator {
     running: !root.serviceReady
     repeat: true
     triggeredOnStart: true
-    onTriggered: root.service = (root.bar && root.bar.shell && root.bar.shell.serviceFor("io.github.williamjohndavisiii.heliotrope")) || Registry.service
+    onTriggered: root.service = (root.bar && root.bar.shell && root.bar.shell.serviceFor("io.github.cwilliams5.locus")) || Registry.service
   }
 
   // The panel counts as hovering the bar, so the peek stays open and the icon
