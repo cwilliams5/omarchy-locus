@@ -47,7 +47,7 @@ in the same commit as the work.
 
 Phase A, foundation:
 
-- [ ] A1. Split settings from state: `locus.json` (settings, tracked by Cody's dotfiles) and `locus-state.json` (holds, coordinates; untracked). **Cody chose option (b) on 2026-11-19.**
+- [x] A1. Split settings from state: `locus.json` (settings, tracked by Cody's dotfiles) and `locus-state.json` (holds, coordinates; untracked). Option (b), Cody's choice (9953ed0, tested live: the split, per-file writes, atomic outside writes)
 - [x] A2. Finer rounding for very warm fades (5be21b1, tested live)
 
 Phase B, features that cost nothing to run:
