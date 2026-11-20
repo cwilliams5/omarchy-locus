@@ -16,6 +16,7 @@ Panel {
   readonly property int stepTemp: 100
   readonly property int snapTemp: 50
   readonly property int stepMinutes: 15
+  readonly property int fadeStepMinutes: 5
 
   // Services can finish loading after the bar, and looking one up isn't a
   // binding, so keep asking until it answers.
@@ -114,8 +115,21 @@ Panel {
     service.setMode(modes[(modes.indexOf(mode) + 1) % modes.length])
   }
 
+  // Minutes as the steppers show them, like "45 min" or "At once".
+  function minutesText(minutes) {
+    return minutes > 0 ? strings.t("fade.minutes").arg(Commons.I18n.formatNumber(minutes, 0)) : strings.t("fade.instant")
+  }
+
+  function offsetText(minutes) {
+    if (minutes > 0) return strings.t("start.before").arg(Commons.I18n.formatNumber(minutes, 0))
+    if (minutes < 0) return strings.t("start.after").arg(Commons.I18n.formatNumber(-minutes, 0))
+    return strings.t("start.at")
+  }
+
   function statusText() {
     if (previewing) return strings.t("status.preview")
+    if (serviceReady && service.pausedNow)
+      return service.frontLabel !== "" ? strings.t("status.paused").arg(service.frontLabel) : strings.t("status.pausedPlain")
     if (switchOn && untilMs) return strings.t("status.onUntil").arg(clockText(untilMs))
     if (!switchOn && untilMs) return strings.t("status.offUntil").arg(clockText(untilMs))
     return switchOn ? strings.t("status.on") : strings.t("status.off")
@@ -133,7 +147,9 @@ Panel {
     bar: root.bar
     text: "󰔎"
     dimmed: !root.nightOn
-    tooltipText: root.nightOn ? strings.t("tooltip.on").arg(root.shownTemp) : strings.t("tooltip.off")
+    tooltipText: root.serviceReady && root.service.pausedNow
+      ? strings.t("tooltip.paused").arg(root.service.frontLabel)
+      : root.nightOn ? strings.t("tooltip.on").arg(root.shownTemp) : strings.t("tooltip.off")
     onPressed: function(pressedButton) {
       if (pressedButton === Qt.RightButton) root.flipSwitch()
       else root.toggle()
@@ -162,7 +178,7 @@ Panel {
     open: root.opened
     focusTarget: panel.loadedContent
     contentWidth: panel.fittedContentWidth(Style.space(340))
-    contentHeight: panel.fittedContentHeight(panel.loadedContentHeight, Style.space(460))
+    contentHeight: panel.fittedContentHeight(panel.loadedContentHeight, Style.space(680))
 
     content: PanelKeyCatcher {
       id: keys
@@ -176,9 +192,20 @@ Panel {
       onTabRequested: function(direction) { root.switchPanel(direction) }
       onTextKey: function(text) { if (text === "m") root.cycleMode() }
 
+      // Scrolls only when the screen is too short for everything.
+      Flickable {
+        id: panelFlick
+        anchors.fill: parent
+        contentWidth: width
+        contentHeight: panelColumn.implicitHeight
+        clip: true
+        boundsBehavior: Flickable.StopAtBounds
+        flickableDirection: Flickable.VerticalFlick
+        interactive: contentHeight > height
+
       Column {
         id: panelColumn
-        width: parent.width
+        width: panelFlick.width
         spacing: Style.space(14)
 
         PanelHero {
@@ -321,11 +348,32 @@ Panel {
             }
           }
 
+          StepRow {
+            visible: root.mode === "sun"
+            label: strings.t("start")
+            valueText: root.offsetText(root.serviceReady ? root.service.sunsetOffset : 0)
+            onStepped: function(direction) { if (root.serviceReady) root.service.stepSunsetOffset(direction * root.stepMinutes) }
+          }
+
           SwitchRow {
             visible: root.mode !== "manual"
             label: strings.t("ramp")
             checked: root.serviceReady && root.service.ramp
             onToggled: if (root.serviceReady) root.service.setRamp(!root.service.ramp)
+          }
+
+          StepRow {
+            visible: root.mode !== "manual" && root.serviceReady && root.service.ramp
+            label: strings.t("fade.in")
+            valueText: root.minutesText(root.serviceReady ? root.service.fadeIn : 0)
+            onStepped: function(direction) { if (root.serviceReady) root.service.stepFade("fadeIn", direction * root.fadeStepMinutes) }
+          }
+
+          StepRow {
+            visible: root.mode !== "manual" && root.serviceReady && root.service.ramp
+            label: strings.t("fade.out")
+            valueText: root.minutesText(root.serviceReady ? root.service.fadeOut : 0)
+            onStepped: function(direction) { if (root.serviceReady) root.service.stepFade("fadeOut", direction * root.fadeStepMinutes) }
           }
 
           Item {
@@ -406,7 +454,171 @@ Panel {
             }
           }
         }
+
+        PanelSeparator {
+          foreground: root.bar.foreground
+        }
+
+        // Apps that need true colour: the screen stays neutral while one is in front.
+        Column {
+          width: parent.width
+          spacing: Style.space(10)
+
+          PanelSectionHeader {
+            text: strings.t("pause")
+            foreground: root.bar.foreground
+            fontFamily: root.bar.fontFamily
+          }
+
+          SwitchRow {
+            label: strings.t("pause.fullscreen")
+            checked: root.serviceReady && root.service.pauseFullscreen
+            onToggled: if (root.serviceReady) root.service.setPauseFullscreen(!root.service.pauseFullscreen)
+          }
+
+          // The app in front, with a button to add it to the list or take it off.
+          Item {
+            width: parent.width
+            implicitHeight: Math.max(frontText.implicitHeight, frontButton.implicitHeight)
+
+            Text {
+              id: frontText
+              textFormat: Text.PlainText
+              anchors.left: parent.left
+              anchors.right: frontButton.left
+              anchors.rightMargin: Style.space(8)
+              anchors.verticalCenter: parent.verticalCenter
+              text: "󰖯  " + (root.serviceReady && root.service.frontLabel !== "" ? root.service.frontLabel : strings.t("pause.none"))
+              color: root.bar.foreground
+              opacity: root.serviceReady && root.service.frontAppPausable ? 1 : 0.6
+              font.family: root.bar.fontFamily
+              font.pixelSize: Style.font.body
+              elide: Text.ElideRight
+            }
+
+            Button {
+              id: frontButton
+              anchors.right: parent.right
+              anchors.verticalCenter: parent.verticalCenter
+              iconText: "󰏤"
+              tooltipText: root.serviceReady && root.service.frontAppListed ? strings.t("pause.frontStop") : strings.t("pause.front")
+              bordered: true
+              selected: root.serviceReady && root.service.frontAppListed
+              enabled: root.serviceReady && root.service.frontAppPausable
+              opacity: enabled ? 1 : 0.5
+              foreground: root.bar.foreground
+              fontFamily: root.bar.fontFamily
+              onClicked: if (root.serviceReady) root.service.toggleFrontApp()
+            }
+          }
+
+          Repeater {
+            model: root.serviceReady ? root.service.pauseApps : []
+
+            delegate: Item {
+              id: appRow
+              required property string modelData
+              width: parent.width
+              implicitHeight: Math.max(appText.implicitHeight, removeButton.implicitHeight)
+
+              Text {
+                id: appText
+                textFormat: Text.PlainText
+                anchors.left: parent.left
+                anchors.right: removeButton.left
+                anchors.rightMargin: Style.space(8)
+                anchors.verticalCenter: parent.verticalCenter
+                text: appRow.modelData
+                color: root.bar.foreground
+                font.family: root.bar.fontFamily
+                font.pixelSize: Style.font.body
+                elide: Text.ElideRight
+              }
+
+              Button {
+                id: removeButton
+                anchors.right: parent.right
+                anchors.verticalCenter: parent.verticalCenter
+                iconText: "󰅖"
+                tooltipText: strings.t("pause.remove")
+                bordered: true
+                foreground: root.bar.foreground
+                fontFamily: root.bar.fontFamily
+                onClicked: if (root.serviceReady) root.service.setPausedApp(appRow.modelData, false)
+              }
+            }
+          }
+        }
       }
+      }
+    }
+  }
+
+  // A label with − and + buttons either side of its value; scrolling steps too.
+  component StepRow: Item {
+    id: stepRow
+
+    property string label: ""
+    property string valueText: ""
+    signal stepped(int direction)
+
+    width: parent.width
+    implicitHeight: Math.max(stepLabel.implicitHeight, stepDown.implicitHeight)
+
+    Text {
+      id: stepLabel
+      textFormat: Text.PlainText
+      text: stepRow.label
+      color: root.bar.foreground
+      font.family: root.bar.fontFamily
+      font.pixelSize: Style.font.body
+      anchors.left: parent.left
+      anchors.right: stepButtons.left
+      anchors.rightMargin: Style.space(8)
+      anchors.verticalCenter: parent.verticalCenter
+      elide: Text.ElideRight
+    }
+
+    Row {
+      id: stepButtons
+      anchors.right: parent.right
+      anchors.verticalCenter: parent.verticalCenter
+      spacing: Style.space(8)
+
+      Button {
+        id: stepDown
+        text: "−"
+        bordered: true
+        foreground: root.bar.foreground
+        fontFamily: root.bar.fontFamily
+        onClicked: stepRow.stepped(-1)
+      }
+
+      Text {
+        textFormat: Text.PlainText
+        text: stepRow.valueText
+        width: Style.space(132)
+        horizontalAlignment: Text.AlignHCenter
+        color: root.bar.foreground
+        font.family: root.bar.fontFamily
+        font.pixelSize: Style.font.body
+        font.bold: true
+        elide: Text.ElideRight
+        anchors.verticalCenter: parent.verticalCenter
+      }
+
+      Button {
+        text: "+"
+        bordered: true
+        foreground: root.bar.foreground
+        fontFamily: root.bar.fontFamily
+        onClicked: stepRow.stepped(1)
+      }
+    }
+
+    WheelHandler {
+      acceptedDevices: PointerDevice.Mouse | PointerDevice.TouchPad
+      onWheel: function(event) { stepRow.stepped(event.angleDelta.y > 0 ? 1 : -1) }
     }
   }
 

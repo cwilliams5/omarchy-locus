@@ -24,7 +24,9 @@ BarIndicator {
   active: serviceReady && service.nightOn
   activeText: "󰔎"
   activeTooltipText: strings.t("tooltip.on").arg(root.shownTemp)
-  inactiveTooltipText: strings.t("tooltip.off")
+  inactiveTooltipText: serviceReady && service.pausedNow
+    ? strings.t("tooltip.paused").arg(service.frontLabel)
+    : strings.t("tooltip.off")
 
   Commons.Translations { id: strings; directory: Qt.resolvedUrl("i18n") }
 

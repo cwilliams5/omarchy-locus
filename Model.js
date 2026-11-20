@@ -12,10 +12,25 @@ var OFF_TEMP = 6500 // Reported while off, matching omarchy-toggle-nightlight
 var FRESH_TEMP = 6000 // hyprsunset's default; only ever reported right after it starts
 var DAY_MS = 86400000
 var MODES = ["manual", "sun", "custom"]
-var RAMP_IN_MS = 3600000 // Warming up, from the moment the schedule turns on
-var RAMP_OUT_MS = 1800000 // Clearing, ending the moment the schedule turns off
+var MINUTE_MS = 60000
+var RAMP_IN_MS = 3600000 // Default warm-up, from the moment the schedule turns on
+var RAMP_OUT_MS = 1800000 // Default clear-down, ending the moment the schedule turns off
+var MAX_FADE_MINUTES = 180
+var MIN_SUNSET_OFFSET = -120 // Minutes; negative starts after sunset
+var MAX_SUNSET_OFFSET = 180 // Minutes; positive starts before sunset
 var FADE_MS = 2000 // Flipping the switch
 var MOVED_DEGREES = 0.05 // About 5 km, or a few seconds of sunset
+// Fade steps are spaced about this many mireds apart, under the ~5 the eye can
+// just tell apart, and never more often than MIN_STEP_MS. A change under half a
+// step isn't worth sending: that's what a check between steps sees, while a due
+// step always clears it, even after rounding to 10K (about 1 mired at 3000K).
+var STEP_MIREDS = 3
+var MIN_SEND_MIREDS = STEP_MIREDS / 2
+var MIN_STEP_MS = 5000
+var CHECK_MS = 60000 // Longest gap between looks at hyprsunset when nothing is due
+var PROFILE_RECHECK_MS = [2000, 62000] // After a hyprsunset.conf switch time; it can land up to a minute late
+var PAUSE_APPS_MAX = 32
+var APP_NAME_MAX = 64
 
 function isLatitude(value) {
   return Number.isFinite(value) && Math.abs(value) <= 90
@@ -38,8 +53,79 @@ function defaultSettings() {
     ramp: true,
     rampSkipUntil: 0,
     autoLocation: false,
-    detected: null
+    detected: null,
+    sunsetOffset: 0,
+    fadeIn: RAMP_IN_MS / MINUTE_MS,
+    fadeOut: RAMP_OUT_MS / MINUTE_MS,
+    pauseFullscreen: false,
+    pauseApps: []
   }
+}
+
+function clampInt(value, low, high) {
+  return Math.max(low, Math.min(high, Math.round(Number(value))))
+}
+
+// An app class to step aside for, as typed or taken from the app in front:
+// letters, digits and . _ + - and inner spaces, with an optional * at the end
+// matching any class that starts with the rest (steam_app_* for every Steam game).
+function cleanAppName(value) {
+  if (typeof value !== "string") return null
+  var name = value.trim()
+  if (name.length === 0 || name.length > APP_NAME_MAX) return null
+  return /^[A-Za-z0-9][A-Za-z0-9._+ -]*\*?$/.test(name) && name !== "*" ? name : null
+}
+
+// The apps list, from an array or a comma-separated string: cleaned, without
+// repeats (ignoring case), and bounded.
+function appList(value) {
+  var items = Array.isArray(value) ? value : (typeof value === "string" ? value.split(",") : [])
+  var out = []
+  var seen = {}
+  for (var i = 0; i < items.length && out.length < PAUSE_APPS_MAX; i++) {
+    var name = cleanAppName(items[i])
+    if (name === null || seen[name.toLowerCase()]) continue
+    seen[name.toLowerCase()] = true
+    out.push(name)
+  }
+  return out
+}
+
+function appMatches(pattern, appClass) {
+  var want = String(pattern).toLowerCase()
+  var have = String(appClass).toLowerCase()
+  if (want.charAt(want.length - 1) === "*") return have.indexOf(want.slice(0, -1)) === 0
+  return have === want
+}
+
+// Whether the screen should stay neutral for the app in front: a real
+// fullscreen window when that's turned on, or a class in the list.
+function pausedFor(settings, appClass, fullscreen) {
+  if (settings.pauseFullscreen && fullscreen === true) return true
+  if (!appClass) return false
+  for (var i = 0; i < settings.pauseApps.length; i++)
+    if (appMatches(settings.pauseApps[i], appClass)) return true
+  return false
+}
+
+// The pause list with one app added or taken out. Taking out removes every
+// entry that matches it exactly, ignoring case; wildcards stay unless named.
+function withPausedApp(settings, appClass, on) {
+  var name = cleanAppName(appClass)
+  if (name === null) return settings.pauseApps.slice()
+  var rest = settings.pauseApps.filter(function(app) { return app.toLowerCase() !== name.toLowerCase() })
+  return on ? appList(rest.concat([name])) : rest
+}
+
+// A name from outside (an app's class or title) made safe and short for a
+// label: no control characters, nothing that reads as markup, at most 60
+// characters.
+function displayName(value) {
+  var text = String(value === undefined || value === null ? "" : value)
+    .replace(/[\u0000-\u001f\u007f-\u009f]/g, "")
+    .replace(/</g, "‹").replace(/>/g, "›").replace(/&/g, "＆")
+    .trim()
+  return text.length > 60 ? text.slice(0, 59) + "…" : text
 }
 
 function parseTime(text) {
@@ -104,6 +190,11 @@ function normalizeSettings(raw) {
       name: typeof detected.name === "string" ? detected.name.slice(0, 64) : ""
     }
   }
+  if (Number.isFinite(raw.sunsetOffset)) result.sunsetOffset = clampInt(raw.sunsetOffset, MIN_SUNSET_OFFSET, MAX_SUNSET_OFFSET)
+  if (Number.isFinite(raw.fadeIn)) result.fadeIn = clampInt(raw.fadeIn, 0, MAX_FADE_MINUTES)
+  if (Number.isFinite(raw.fadeOut)) result.fadeOut = clampInt(raw.fadeOut, 0, MAX_FADE_MINUTES)
+  if (typeof raw.pauseFullscreen === "boolean") result.pauseFullscreen = raw.pauseFullscreen
+  result.pauseApps = appList(raw.pauseApps)
   return result
 }
 
@@ -239,12 +330,19 @@ function localAt(nowMs, dayOffset, minutes) {
     Math.floor(minutes / 60), minutes % 60).getTime()
 }
 
+// When Sun mode turns on, on the day of `sun`: sunsetOffset minutes before
+// sunset (after it, when negative), and never before that day's sunrise.
+function sunOn(settings, sun) {
+  return Math.max(sun.sunrise, sun.sunset - settings.sunsetOffset * MINUTE_MS)
+}
+
 // What the schedule alone says now, and when it next changes its mind.
 function scheduleAt(settings, location, nowMs) {
   if (settings.mode === "sun") {
     var today = sunTimes(nowMs, location.latitude, location.longitude)
+    var on = sunOn(settings, today)
     if (nowMs < today.sunrise) return { on: true, next: today.sunrise }
-    if (nowMs < today.sunset) return { on: false, next: today.sunset }
+    if (nowMs < on) return { on: false, next: on }
     var tomorrow = sunTimes(localAt(nowMs, 1, 720), location.latitude, location.longitude)
     return { on: true, next: tomorrow.sunrise }
   }
@@ -267,8 +365,9 @@ function scheduleAt(settings, location, nowMs) {
 function scheduleStart(settings, location, nowMs) {
   if (settings.mode === "sun") {
     var today = sunTimes(nowMs, location.latitude, location.longitude)
-    if (nowMs >= today.sunset) return today.sunset
-    return sunTimes(localAt(nowMs, -1, 720), location.latitude, location.longitude).sunset
+    var on = sunOn(settings, today)
+    if (nowMs >= on) return on
+    return sunOn(settings, sunTimes(localAt(nowMs, -1, 720), location.latitude, location.longitude))
   }
   var onMinutes = parseTime(settings.onTime)
   var now = new Date(nowMs)
@@ -303,24 +402,169 @@ function mixKelvin(from, to, progress) {
 
 // The temperature the screen should be at now, including any ramp in progress.
 // Worked out from the clock alone, so a restart or suspend lands in the right place.
-function kelvinAt(settings, location, nowMs) {
-  if (!desiredState(settings, location, nowMs).on) return OFF_TEMP
-  var target = settings.temperature
-  if (!settings.ramp || followsSwitch(settings, location)) return target
-  if (settings.override && nowMs < settings.override.until) return target
+// A paused app in front keeps the screen neutral whatever the schedule says.
+function kelvinAt(settings, location, nowMs, paused) {
+  if (paused === true || !desiredState(settings, location, nowMs).on) return OFF_TEMP
+  var ramp = rampAt(settings, location, nowMs)
+  return ramp ? mixKelvin(OFF_TEMP, settings.temperature, ramp.progress) : settings.temperature
+}
 
-  var progress = (scheduleAt(settings, location, nowMs).next - nowMs) / RAMP_OUT_MS
-  if (nowMs >= settings.rampSkipUntil)
-    progress = Math.min(progress, (nowMs - scheduleStart(settings, location, nowMs)) / RAMP_IN_MS)
-  return mixKelvin(OFF_TEMP, target, progress)
+// The fade the schedule is in now: how far it is from the daytime value (0) to
+// the temperature (1), how long it lasts in all and how long it has left, and
+// whether it's the warm-up. The warm-up's progress rises and the clear-down's
+// falls. The two can overlap on a short night; the one nearer the daytime value
+// wins. Null outside a fade.
+function rampAt(settings, location, nowMs) {
+  if (!settings.ramp || followsSwitch(settings, location)) return null
+  if (settings.override && nowMs < settings.override.until) return null
+  if (!desiredState(settings, location, nowMs).on) return null
+  var ramp = null
+  var outMs = settings.fadeOut * MINUTE_MS
+  if (outMs > 0) {
+    var outProgress = (scheduleAt(settings, location, nowMs).next - nowMs) / outMs
+    // The clear-down's first instant counts, so the step after it gets scheduled.
+    if (outProgress <= 1)
+      ramp = { progress: Math.max(0, outProgress), lengthMs: outMs, remainingMs: Math.max(0, outProgress) * outMs, warming: false }
+  }
+  var inMs = settings.fadeIn * MINUTE_MS
+  if (inMs > 0 && nowMs >= settings.rampSkipUntil) {
+    var inProgress = (nowMs - scheduleStart(settings, location, nowMs)) / inMs
+    if (inProgress < 1 && (!ramp || inProgress < ramp.progress))
+      ramp = { progress: Math.max(0, inProgress), lengthMs: inMs, remainingMs: (1 - Math.max(0, inProgress)) * inMs, warming: true }
+  }
+  return ramp
 }
 
 // A hold that was keeping the night light on has ended at the moment the schedule
 // takes over. Skip that evening's warm-up, or the screen would clear and start again.
-function holdEndPatch(override) {
+function holdEndPatch(override, settings) {
   var patch = { override: null }
-  if (override && override.on) patch.rampSkipUntil = override.until + RAMP_IN_MS
+  var warmUp = settings && Number.isFinite(settings.fadeIn) ? settings.fadeIn * MINUTE_MS : RAMP_IN_MS
+  if (override && override.on) patch.rampSkipUntil = override.until + warmUp
   return patch
+}
+
+function mireds(kelvin) {
+  return 1000000 / kelvin
+}
+
+// Whether moving the screen from `from` to `to` is worth telling hyprsunset:
+// always for the first value and for the end of a fade (the temperature itself,
+// or off); otherwise only a change of at least MIN_SEND_MIREDS.
+function isVisibleStep(from, to, target) {
+  if (from === null || from === undefined) return true
+  if (from === to) return false
+  if (to === target || to === OFF_TEMP) return true
+  return Math.abs(mireds(from) - mireds(to)) >= MIN_SEND_MIREDS
+}
+
+// A change too big to be a fade's next step, which looks better faded over a
+// couple of seconds than snapped to.
+function isBigJump(from, to) {
+  if (from === null || from === undefined || to === null || to === undefined) return false
+  return Math.abs(mireds(from) - mireds(to)) > 4 * STEP_MIREDS
+}
+
+// How long the fade in progress takes to move STEP_MIREDS, never under
+// MIN_STEP_MS. Null outside a fade.
+function fadeStepMs(settings, location, nowMs) {
+  var ramp = rampAt(settings, location, nowMs)
+  if (!ramp) return null
+  var span = Math.abs(mireds(OFF_TEMP) - mireds(settings.temperature))
+  var step = span > STEP_MIREDS ? ramp.lengthMs * STEP_MIREDS / span : ramp.lengthMs
+  return Math.max(MIN_STEP_MS, step)
+}
+
+// The next time `minute` (minutes after local midnight) comes round after nowMs.
+function nextClock(nowMs, minute) {
+  var today = localAt(nowMs, 0, minute)
+  return today > nowMs ? today : localAt(nowMs, 1, minute)
+}
+
+// The next moment the screen should change by itself, so the service can sleep
+// until then instead of checking all the time: a scheduled switch, the start of
+// the clear-down, the next visible fade step or the end of the fade, a hold
+// ending, or just after one of hyprsunset.conf's own switch times. Null when
+// nothing is due.
+function nextDueAt(settings, location, nowMs, profileMinutes) {
+  var due = []
+  if (!followsSwitch(settings, location)) {
+    var schedule = scheduleAt(settings, location, nowMs)
+    due.push(schedule.next)
+    if (schedule.on && settings.ramp && settings.fadeOut > 0) due.push(schedule.next - settings.fadeOut * MINUTE_MS)
+  }
+  if (settings.override) due.push(settings.override.until)
+  if (settings.rampSkipUntil) due.push(settings.rampSkipUntil)
+  var ramp = rampAt(settings, location, nowMs)
+  if (ramp) {
+    due.push(nowMs + fadeStepMs(settings, location, nowMs))
+    due.push(nowMs + ramp.remainingMs)
+  }
+  var minutes = Array.isArray(profileMinutes) ? profileMinutes : []
+  var lastRecheck = PROFILE_RECHECK_MS[PROFILE_RECHECK_MS.length - 1]
+  for (var i = 0; i < minutes.length; i++) {
+    // The switch coming up, and one that has just passed but whose rechecks haven't.
+    var times = [nextClock(nowMs - lastRecheck, minutes[i]), nextClock(nowMs, minutes[i])]
+    for (var t = 0; t < times.length; t++)
+      for (var r = 0; r < PROFILE_RECHECK_MS.length; r++) due.push(times[t] + PROFILE_RECHECK_MS[r])
+  }
+  var next = null
+  for (var k = 0; k < due.length; k++)
+    if (due[k] > nowMs && (next === null || due[k] < next)) next = due[k]
+  return next
+}
+
+// hyprsunset.conf's own profiles: the minute of the day each one switches at, and
+// the temperature hyprsunset reports afterwards. An identity profile, or one
+// without a temperature, reports hyprsunset's default, FRESH_TEMP. Comments are
+// ignored, so Omarchy's commented-out example doesn't count.
+function hyprsunsetProfiles(text) {
+  var minutes = []
+  var values = []
+  var lines = String(text === undefined || text === null ? "" : text).slice(0, 65536).split("\n")
+  var inside = false
+  var time = null
+  var temperature = null
+  var identity = false
+  for (var i = 0; i < lines.length; i++) {
+    var line = lines[i].replace(/#.*/, "")
+    if (/^\s*profile\s*\{/.test(line)) {
+      inside = true
+      time = null
+      temperature = null
+      identity = false
+      line = line.replace(/^\s*profile\s*\{/, "")
+    }
+    if (!inside) continue
+    var clock = /\btime\s*=\s*(\d{1,2}:\d{2})/.exec(line)
+    if (clock) time = parseTime(clock[1])
+    var kelvin = /\btemperature\s*=\s*(\d{3,5})\b/.exec(line)
+    if (kelvin) temperature = Number(kelvin[1])
+    if (/\bidentity\s*=\s*true\b/.test(line)) identity = true
+    if (line.indexOf("}") !== -1) {
+      if (time !== null) {
+        minutes.push(time)
+        values.push(identity || temperature === null ? FRESH_TEMP : temperature)
+      }
+      inside = false
+    }
+  }
+  return { minutes: minutes, values: values }
+}
+
+// Whether one of hyprsunset.conf's switch times fell between two looks.
+// hyprsunset can carry out a switch up to a minute late, so one scheduled just
+// before the earlier look still counts.
+function profileSwitchBetween(minutes, fromMs, toMs) {
+  if (!(fromMs > 0) || !(toMs >= fromMs) || toMs - fromMs > DAY_MS) return false
+  var list = Array.isArray(minutes) ? minutes : []
+  for (var i = 0; i < list.length; i++)
+    if (nextClock(fromMs - MINUTE_MS - 1, list[i]) <= toMs) return true
+  return false
+}
+
+function isProfileValue(reading, values) {
+  return Array.isArray(values) && values.indexOf(reading) !== -1
 }
 
 // The main switch. With a schedule, flipping away from it holds until the next
@@ -346,6 +590,31 @@ if (typeof module !== "undefined") {
     RAMP_IN_MS: RAMP_IN_MS,
     RAMP_OUT_MS: RAMP_OUT_MS,
     FADE_MS: FADE_MS,
+    MAX_FADE_MINUTES: MAX_FADE_MINUTES,
+    MIN_SUNSET_OFFSET: MIN_SUNSET_OFFSET,
+    MAX_SUNSET_OFFSET: MAX_SUNSET_OFFSET,
+    STEP_MIREDS: STEP_MIREDS,
+    MIN_SEND_MIREDS: MIN_SEND_MIREDS,
+    MIN_STEP_MS: MIN_STEP_MS,
+    CHECK_MS: CHECK_MS,
+    PAUSE_APPS_MAX: PAUSE_APPS_MAX,
+    APP_NAME_MAX: APP_NAME_MAX,
+    cleanAppName: cleanAppName,
+    appList: appList,
+    pausedFor: pausedFor,
+    withPausedApp: withPausedApp,
+    displayName: displayName,
+    sunOn: sunOn,
+    rampAt: rampAt,
+    isVisibleStep: isVisibleStep,
+    isBigJump: isBigJump,
+    fadeStepMs: fadeStepMs,
+    nextClock: nextClock,
+    nextDueAt: nextDueAt,
+    hyprsunsetProfiles: hyprsunsetProfiles,
+    profileSwitchBetween: profileSwitchBetween,
+    isProfileValue: isProfileValue,
+    scheduleStart: scheduleStart,
     defaultSettings: defaultSettings,
     parseTime: parseTime,
     stepTime: stepTime,

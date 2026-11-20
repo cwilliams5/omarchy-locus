@@ -1,6 +1,8 @@
 import QtQuick
 import Quickshell
 import Quickshell.Io
+import Quickshell.Wayland
+import Quickshell.Hyprland
 import qs.Commons
 import "Model.js" as Model
 import "Registry.js" as Registry
@@ -12,6 +14,11 @@ import "Registry.js" as Registry
 // The screen follows Model.kelvinAt, which is steady except during a ramp. If
 // `omarchy toggle nightlight` or a hand-typed hyprctl command changes it, that is
 // noticed and stays put until the next scheduled change, even in mid-ramp.
+//
+// Every check looks at hyprsunset first and only then decides what to send
+// (step), so nothing Sundown sends can overwrite a change it hasn't seen yet.
+// Checks happen when something is due (Model.nextDueAt) and at least once a
+// minute, more often only while the panel is open or hyprsunset is starting.
 Item {
   id: root
 
@@ -80,18 +87,52 @@ Item {
   property int shaderRunStep: 0
   readonly property string shaderScript: String(Qt.resolvedUrl("warm-shader.sh")).replace(/^file:\/\//, "")
 
+  // hyprsunset.conf's own switch times (Omarchy's goes neutral at 07:00), so a
+  // change they make is put right promptly instead of taken for a hand.
+  property var profiles: ({ minutes: [], values: [] })
+  property real lastLookAt: 0
+  property real profileGraceUntil: 0
+  // When the next check is due, for the status command.
+  property real nextCheckAt: 0
+
+  // The app in front, and whether it's really fullscreen. Hyprland reports a
+  // maximized window as fullscreen 1 and a real one with bit 2 set, so only bit
+  // 2 counts, as in Omarchy's own bar.
+  readonly property var frontWindow: ToplevelManager.activeToplevel
+  readonly property string frontApp: frontWindow ? String(frontWindow.appId || "") : ""
+  readonly property bool frontFullscreen: {
+    var window = Hyprland.activeToplevel
+    var ipc = window ? window.lastIpcObject : null
+    return !!ipc && (Number(ipc.fullscreen) & 2) !== 0
+  }
+  readonly property bool pausedNow: settingsLoaded && Model.pausedFor(settings, frontApp, frontFullscreen)
+  readonly property string frontLabel: Model.displayName(frontApp)
+  readonly property bool frontAppPausable: Model.cleanAppName(frontApp) !== null
+  readonly property bool frontAppListed: frontAppPausable
+    && settings.pauseApps.some(function(app) { return app.toLowerCase() === frontApp.toLowerCase() })
+
   // Counts as on through the first, barely tinted part of a ramp, and shows where
   // a fade is heading so the switch doesn't flicker.
   readonly property bool nightOn: fadeTimer.running
     ? fadeTarget < Model.FRESH_TEMP
-    : actualTemp !== null && (actualTemp < Model.FRESH_TEMP || (plan.on && !externalHold))
-  readonly property bool switchOn: nightOn && !(previewing && !plan.on)
+    : actualTemp !== null && (actualTemp < Model.FRESH_TEMP || (plan.on && !externalHold && !pausedNow))
+  // The switch shows the schedule's answer, so it stays on while a paused app
+  // keeps the screen neutral.
+  readonly property bool switchOn: (nightOn || (pausedNow && plan.on && !externalHold)) && !(previewing && !plan.on)
   readonly property string mode: settings.mode
   readonly property int temperature: settings.temperature
   readonly property string onTime: settings.onTime
   readonly property string offTime: settings.offTime
   readonly property bool ramp: settings.ramp
   readonly property bool autoLocation: settings.autoLocation
+  readonly property int sunsetOffset: settings.sunsetOffset
+  readonly property int fadeIn: settings.fadeIn
+  readonly property int fadeOut: settings.fadeOut
+  readonly property bool pauseFullscreen: settings.pauseFullscreen
+  readonly property var pauseApps: settings.pauseApps
+
+  onPausedNowChanged: tick()
+  onPanelOpenChanged: tick()
 
   function updateSettings(patch) {
     // Saving before the file has loaded would replace it with the defaults.
@@ -119,7 +160,7 @@ Item {
     switching = true
     updateSettings(Model.switchPatch(settings, location, Date.now(), turnOn))
     switching = false
-    lastPlanOn = plan.on
+    lastPlanOn = wantOn()
     // Also covers a switch that already matched the plan, like after the menu's toggle.
     var level = currentLevel()
     lastLevel = level
@@ -196,6 +237,47 @@ Item {
     setTime(key, Model.stepTime(key === "onTime" ? onTime : offTime, deltaMinutes))
   }
 
+  // Minutes before sunset that Sun mode turns on; negative is after it.
+  function setSunsetOffset(minutes) {
+    updateSettings({ sunsetOffset: Number(minutes) })
+  }
+
+  function stepSunsetOffset(deltaMinutes) {
+    setSunsetOffset(sunsetOffset + deltaMinutes)
+  }
+
+  // Warm-up and clear-down lengths in minutes; 0 switches at once.
+  function setFades(inMinutes, outMinutes) {
+    updateSettings({ fadeIn: Number(inMinutes), fadeOut: Number(outMinutes) })
+  }
+
+  function stepFade(key, deltaMinutes) {
+    var patch = {}
+    patch[key] = (key === "fadeIn" ? fadeIn : fadeOut) + deltaMinutes
+    updateSettings(patch)
+  }
+
+  function setPauseFullscreen(enabled) {
+    updateSettings({ pauseFullscreen: enabled === true })
+  }
+
+  // True when saved; false for a name that can't be a window class.
+  function setPausedApp(appClass, enabled) {
+    if (Model.cleanAppName(appClass) === null) return false
+    updateSettings({ pauseApps: Model.withPausedApp(settings, appClass, enabled) })
+    return true
+  }
+
+  function toggleFrontApp() {
+    if (frontAppPausable) setPausedApp(frontApp, !frontAppListed)
+  }
+
+  // Whether the screen should be warm now: the schedule (or a hold) says on,
+  // and no paused app is in front.
+  function wantOn() {
+    return plan.on && !pausedNow
+  }
+
   function endPreview() {
     if (!previewing) return
     previewTimer.stop()
@@ -206,7 +288,7 @@ Item {
   }
 
   function currentLevel() {
-    return Model.kelvinAt(settings, location, Date.now())
+    return Model.kelvinAt(settings, location, Date.now(), pausedNow)
   }
 
   // A couple of seconds rather than a jump. Needs a temperature to start from, so
@@ -233,7 +315,7 @@ Item {
     if (!settingsLoaded || !locationChecked) return
     var now = Date.now()
     if (settings.override && now >= settings.override.until) {
-      updateSettings(Model.holdEndPatch(settings.override))
+      updateSettings(Model.holdEndPatch(settings.override, settings))
       return
     }
 
@@ -252,25 +334,57 @@ Item {
       sunset = 0
     }
     plan = Model.desiredState(settings, location, now)
-    if (switching) return
+    // Look first; step() decides what to send once hyprsunset has answered. A
+    // look already under way, or the one that follows a send, does the same.
+    if (!probeProcess.running && !applyProcess.running) probeProcess.running = true
+    syncShader()
+    scheduleNext(now)
+  }
 
-    var level = Model.kelvinAt(settings, location, now)
-    if (lastPlanOn !== plan.on) {
+  // What to send, now that hyprsunset's reading is known.
+  function step() {
+    if (switching || applyProcess.running || queuedTarget) return
+    var level = currentLevel()
+    var want = wantOn()
+    if (lastPlanOn !== want) {
       // No fade the first time, or a restart at night would sweep up from nothing.
       var first = lastPlanOn === null
-      lastPlanOn = plan.on
+      lastPlanOn = want
       lastLevel = level
       externalHold = false
       previewTimer.stop()
       previewing = false
       if (first) apply(level)
       else fadeTo(level)
-    } else if (level !== lastLevel && !externalHold && !previewing && !fadeTimer.running) {
+    } else if (!externalHold && !previewing && !fadeTimer.running
+               && Model.isVisibleStep(lastLevel, level, temperature)) {
+      // A fade's next step goes straight on; a bigger jump, like waking up in the
+      // middle of a fade or changing a setting during one, fades over 2 seconds.
+      var jump = Model.isBigJump(lastLevel, level)
       lastLevel = level
-      apply(level)
+      if (jump) fadeTo(level)
+      else apply(level)
     }
-    if (!probeProcess.running) probeProcess.running = true
-    syncShader()
+  }
+
+  // Sleep until the next thing is due, and never longer than a minute, so a
+  // change made elsewhere (Omarchy's key, a restarted hyprsunset) is still seen.
+  function scheduleNext(now) {
+    var due = Model.nextDueAt(settings, location, now, profiles.minutes)
+    var wait = due === null ? Model.CHECK_MS : due - now + 250
+    wait = Math.min(wait, panelOpen ? 5000 : Model.CHECK_MS)
+    if (!applySettled && applyAttempts < 30) wait = 1000
+    checkTimer.interval = Math.max(1000, Math.round(wait))
+    checkTimer.restart()
+    nextCheckAt = now + checkTimer.interval
+  }
+
+  // While hyprsunset is starting or hasn't taken a change, look again every second.
+  function checkSoon() {
+    if (checkTimer.interval <= 1000 && checkTimer.running) return
+    checkTimer.interval = 1000
+    checkTimer.restart()
+    nextCheckAt = Date.now() + 1000
   }
 
   function apply(kelvin) {
@@ -318,11 +432,17 @@ Item {
     var reported = /^[0-9]+$/.test(trimmed) ? Number(trimmed) : null
     if (applyProcess.running || queuedTarget) return
 
+    var now = Date.now()
+    var profileSwitched = Model.profileSwitchBetween(profiles.minutes, lastLookAt, now)
+    lastLookAt = now
+    // hyprsunset can carry out its own switch up to a minute late, so for two
+    // minutes a reading one of its profiles would leave counts as that switch.
+    if (profileSwitched) profileGraceUntil = now + 120000
+
     if (reported === null) {
       actualTemp = null
-      if (plan.on || previewing) {
+      if (currentLevel() !== Model.OFF_TEMP || previewing) {
         // Not running, and needed. Starting it only when needed keeps days free of it.
-        var now = Date.now()
         if (now - lastStartAttempt > 10000) {
           lastStartAttempt = now
           Quickshell.execDetached(["uwsm-app", "--", "hyprsunset"])
@@ -331,8 +451,13 @@ Item {
         applyTarget = previewing ? applyTarget : currentLevel()
         applyAttempts++
         if (applyAttempts % 5 === 0 && applyAttempts <= 30) runApply()
+        checkSoon()
       } else {
+        // Off and not needed: nothing to send, but remember where things stand
+        // so the next scheduled change fades instead of jumping.
         applySettled = true
+        lastPlanOn = wantOn()
+        lastLevel = Model.OFF_TEMP
       }
       return
     }
@@ -341,19 +466,32 @@ Item {
     if (reported === Model.hyprsunsetKelvin(applyTarget)) reported = applyTarget
     actualTemp = reported
     if (reported === Model.FRESH_TEMP) {
-      // hyprsunset just restarted, which drops whatever was set before.
+      // hyprsunset just restarted, or an identity profile in hyprsunset.conf
+      // (Omarchy's 07:00 one) cleared it: either way, put the schedule back.
       fadeTimer.stop()
       externalHold = false
       lastLevel = currentLevel()
       apply(lastLevel)
-    } else if (!applySettled && reported === applyTarget) {
+      return
+    }
+    if (!applySettled && reported === applyTarget) {
       applySettled = true
     } else if (!applySettled && applyAttempts < 30) {
       applyAttempts++
       runApply()
+      checkSoon()
+      return
     } else if (applySettled && reported !== applyTarget && !fadeTimer.running) {
+      if (profileSwitched || (now < profileGraceUntil && Model.isProfileValue(reported, profiles.values))) {
+        // hyprsunset's own clock moved it, not a hand: put it back.
+        externalHold = false
+        lastLevel = currentLevel()
+        apply(lastLevel)
+        return
+      }
       externalHold = true
     }
+    step()
   }
 
   function loadSettings(text) {
@@ -525,13 +663,42 @@ Item {
     onTriggered: root.detectLocation()
   }
 
-  // Checks quickly while a change is settling, like hyprsunset still starting.
+  // The next check. scheduleNext() sets the gap each time; repeating keeps it
+  // going even if a check ever ends early.
   Timer {
-    interval: root.applySettled || root.applyAttempts >= 30 ? 15000 : 1000
-    running: root.settingsLoaded
+    id: checkTimer
+    interval: Model.CHECK_MS
     repeat: true
-    triggeredOnStart: true
     onTriggered: root.tick()
+  }
+
+  FileView {
+    path: (Quickshell.env("XDG_CONFIG_HOME") || (root.home + "/.config")) + "/hypr/hyprsunset.conf"
+    watchChanges: true
+    printErrors: false
+    onFileChanged: reload()
+    onLoaded: {
+      root.profiles = Model.hyprsunsetProfiles(text())
+      root.tick()
+    }
+    onLoadFailed: root.profiles = { minutes: [], values: [] }
+  }
+
+  // A window's fullscreen mode is only in Hyprland's window list, so refresh it
+  // when focus or fullscreen changes, and only while it matters.
+  Connections {
+    target: Hyprland
+    function onRawEvent(event) {
+      if (!root.settings.pauseFullscreen) return
+      var name = String(event.name)
+      if (name === "fullscreen" || name === "activewindowv2" || name === "closewindow") fullscreenRefresh.restart()
+    }
+  }
+
+  Timer {
+    id: fullscreenRefresh
+    interval: 50
+    onTriggered: Hyprland.refreshToplevels()
   }
 
   ShellIpc {
@@ -551,7 +718,16 @@ Item {
         ramp: root.ramp,
         autoLocation: root.autoLocation,
         externalHold: root.externalHold,
-        override: root.settings.override
+        override: root.settings.override,
+        sunsetOffset: root.sunsetOffset,
+        fadeIn: root.fadeIn,
+        fadeOut: root.fadeOut,
+        paused: root.pausedNow,
+        frontApp: Model.displayName(root.frontApp),
+        frontFullscreen: root.frontFullscreen,
+        pauseFullscreen: root.pauseFullscreen,
+        pauseApps: root.pauseApps,
+        nextCheckSeconds: Math.max(0, Math.round((root.nextCheckAt - Date.now()) / 1000))
       })
     }
     function on(): void { root.setSwitch(true) }
@@ -567,6 +743,21 @@ Item {
     function autolocation(value: string): void { root.setAutoLocation(value === "on") }
     function hours(onTime: string, offTime: string): void {
       root.updateSettings({ onTime: onTime, offTime: offTime })
+    }
+    // Minutes before sunset that Sun mode turns on; negative is after sunset.
+    function offset(minutes: int): void { root.setSunsetOffset(minutes) }
+    // Warm-up and clear-down lengths, in minutes.
+    function fade(warmUp: int, clearDown: int): void { root.setFades(warmUp, clearDown) }
+    function pausefullscreen(value: string): void { root.setPauseFullscreen(value === "on") }
+    // An app class to keep neutral for, or a prefix ending in *: on or off.
+    function pauseapp(appClass: string, value: string): string {
+      return root.setPausedApp(appClass, value !== "off") ? "ok" : "invalid"
+    }
+    // Pause for the app in front, or stop pausing for it.
+    function pausefront(): string {
+      if (!root.frontAppPausable) return "no app in front"
+      root.toggleFrontApp()
+      return (root.frontAppListed ? "pausing for " : "not pausing for ") + Model.displayName(root.frontApp)
     }
   }
 }

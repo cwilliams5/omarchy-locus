@@ -19,5 +19,22 @@
   "location.placeholder": "Latitude, longitude",
   "ramp": "Gradual",
   "location.detect": "Find from my IP address",
-  "location.edit": "Enter coordinates"
+  "location.edit": "Enter coordinates",
+  "status.paused": "Paused for %1",
+  "status.pausedPlain": "Paused",
+  "tooltip.paused": "Night light paused while %1 is in front. Right-click to turn off.",
+  "start": "Start",
+  "start.before": "%1 min before sunset",
+  "start.at": "At sunset",
+  "start.after": "%1 min after sunset",
+  "fade.in": "Warm up over",
+  "fade.out": "Clear over",
+  "fade.minutes": "%1 min",
+  "fade.instant": "At once",
+  "pause": "Pause",
+  "pause.fullscreen": "For fullscreen apps",
+  "pause.front": "Pause whenever this app is in front",
+  "pause.frontStop": "Stop pausing for this app",
+  "pause.remove": "Stop pausing for it",
+  "pause.none": "No app in front"
 }
