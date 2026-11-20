@@ -216,7 +216,8 @@ Quickshell 0.3.2.
   integer (checked 2026-11-20 by compiling it: 3000 to 3099 give the same
   matrix). So a 6500K-to-3000K fade changes the screen 35 times, steps of
   about 2 mireds near 6500K and 11 near 3000K. The README's Known limits say
-  so. Re-check after hyprsunset updates.
+  so. Reported as hyprwm/hyprsunset#103 (2026-11-20, approved by Cody).
+  Re-check after hyprsunset updates, and when #103 is fixed, update the README.
 - **Screenshots don't show hyprsunset's tint** (it's a CTM applied after
   capture); they do show the below-1000K screen shader. README images apply
   hyprsunset's own matrix with `media/tint.sh` and say so.

@@ -124,7 +124,10 @@ tint survived a suspend and resume.
   today), so an hour's fade from 6500K to 3000K changes the screen 35 times,
   in steps that grow from about 2 mireds at the start to about 11 near 3000K.
   Locus works fades out in finer steps and sends them; they'll show if
-  hyprsunset ever applies them.
+  hyprsunset ever applies them. The rounding was reported in
+  [hyprwm/hyprsunset#94](https://github.com/hyprwm/hyprsunset/issues/94); its
+  fix still rounds, reported in
+  [hyprwm/hyprsunset#103](https://github.com/hyprwm/hyprsunset/issues/103).
 - **Screenshots and screen recordings don't show the tint,** because it's
   applied on the way to the screen, after capture. Only the deep-red shader
   below 1000K shows up in them.
