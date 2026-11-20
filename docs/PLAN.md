@@ -52,7 +52,7 @@ Phase A, foundation:
 
 Phase B, features that cost nothing to run:
 
-- [ ] B1. Holds for a set time ("off for an hour", "warm for an hour")
+- [x] B1. Holds for a set time ("off for an hour", "warm for an hour") (8ae66f3, tested live: holds, expiry, resume, the panel)
 - [ ] B2. Presets, and Movie mode
 - [ ] B3. Bedtime level, with weekend sleep-in
 - [ ] B4. Late-night dimming
