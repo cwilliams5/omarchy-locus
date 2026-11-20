@@ -850,6 +850,7 @@ Panel {
     signal stepped(int direction)
 
     width: parent.width
+    // The buttons' height even when hidden, so the rows stay evenly spaced.
     implicitHeight: Math.max(stepLabel.implicitHeight, stepDown.implicitHeight)
 
     Text {
@@ -874,8 +875,7 @@ Panel {
 
       Button {
         id: stepDown
-        opacity: stepRow.adjustable ? 1 : 0
-        enabled: stepRow.adjustable
+        visible: stepRow.adjustable
         text: "−"
         bordered: true
         foreground: root.bar.foreground
@@ -897,8 +897,7 @@ Panel {
       }
 
       Button {
-        opacity: stepRow.adjustable ? 1 : 0
-        enabled: stepRow.adjustable
+        visible: stepRow.adjustable
         text: "+"
         bordered: true
         foreground: root.bar.foreground
