@@ -24,7 +24,7 @@ in the same commit as the work.
 
 - **2026-11-19, end of session 1:** A1, A2, B1 done, merged, pushed, tested
   live; the installed copy is on `main`; dotfiles updated.
-- **2026-11-19, session 2:** B2 to B6 done. **Next: B7.**
+- **2026-11-19, session 2:** B2 to B7 done. **Next: B8** (needs Cody's yes or no first: see "Decisions waiting on Cody").
 - Cody's live Locus state at that point: Sun mode, 3000K, and a hold "off
   until morning" (ends at sunrise, 6:30 AM on 2026-11-20). If a test changes
   the hold at night, put it back with
@@ -69,7 +69,7 @@ Phase B, features that cost nothing to run:
 - [x] B4. Late-night dimming (287f41f, tested live: easing with the switch fade, put back after a simulated hyprsunset restart, full brightness in Movie mode)
 - [x] B5. The Arc mark as the bar icon (tested live: bar off and on, the panel header; the vertical bar not tried, the icon is centred by Omarchy's own bounds code)
 - [x] B6. A 24-hour view of the night in the panel (tested live: with bedtime and dimming, and with a hold)
-- [ ] B7. Fades that follow twilight (option)
+- [x] B7. Fades that follow twilight (option) (4578241, tested live: the lengths for Los Angeles tonight, 27 min each, and the panel rows)
 - [ ] B8. Daytime tint (off by default)
 - [ ] B9. Location by city name
 - [ ] B10. Run a command at sunset and sunrise
