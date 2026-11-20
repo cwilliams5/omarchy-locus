@@ -83,7 +83,9 @@ function defaultSettings() {
     // Dimmer late at night, below what the screen's own brightness goes down to.
     dim: false,
     dimFrom: "23:30",
-    dimPercent: 80
+    dimPercent: 80,
+    // Sun mode's fades follow twilight instead of fadeIn and fadeOut.
+    twilight: false
   }
 }
 
@@ -95,7 +97,7 @@ function defaultSettings() {
 var SETTING_KEYS = ["mode", "temperature", "onTime", "offTime", "ramp", "fadeIn", "fadeOut",
                     "sunsetOffset", "pauseFullscreen", "pauseApps", "autoLocation",
                     "bedtime", "bedtimeAt", "bedtimeTemperature", "weekendDelay",
-                    "dim", "dimFrom", "dimPercent"]
+                    "dim", "dimFrom", "dimPercent", "twilight"]
 var STATE_KEYS = ["manualOn", "override", "rampSkipUntil", "latitude", "longitude", "detected"]
 
 function pickKeys(object, keys) {
@@ -271,6 +273,7 @@ function normalizeSettings(raw) {
   if (typeof raw.dim === "boolean") result.dim = raw.dim
   if (parseTime(raw.dimFrom) !== null) result.dimFrom = formatTime(parseTime(raw.dimFrom))
   if (Number.isFinite(raw.dimPercent)) result.dimPercent = clampInt(raw.dimPercent, MIN_DIM_PERCENT, FULL_GAMMA)
+  if (typeof raw.twilight === "boolean") result.twilight = raw.twilight
   return result
 }
 
@@ -352,8 +355,15 @@ function resolveLocation(settings, weather, zone) {
 function radians(degrees) { return degrees * Math.PI / 180 }
 function degrees(value) { return value * 180 / Math.PI }
 
-// NOAA solar equations: minutes after 00:00 UTC on the given date.
-function sunMinutesUtc(year, month, day, latitude, longitude, rising) {
+var SUNRISE_ZENITH = 90.833 // The sun's top edge on the horizon, with refraction
+var CIVIL_ZENITH = 96 // The sun 6 degrees below the horizon: the end of civil dusk
+
+// NOAA solar equations: minutes after 00:00 UTC on the given date, for the sun
+// crossing `zenith` degrees (sunrise and sunset by default). When it never
+// gets that far that day, sunrise and sunset fall back to noon or midnight
+// (as they always have), and anything else is NaN.
+function sunMinutesUtc(year, month, day, latitude, longitude, rising, zenith) {
+  var target = zenith === undefined ? SUNRISE_ZENITH : zenith
   var julianDay = Date.UTC(year, month, day) / DAY_MS + 2440587.5
   var minutes = 720
   for (var i = 0; i < 3; i++) {
@@ -379,8 +389,9 @@ function sunMinutesUtc(year, month, day, latitude, longitude, rising) {
       - 0.5 * y * y * Math.sin(4 * l0r)
       - 1.25 * e * e * Math.sin(2 * m))
     var lat = radians(latitude)
-    var cosHourAngle = (Math.cos(radians(90.833)) - Math.sin(lat) * Math.sin(declination))
+    var cosHourAngle = (Math.cos(radians(target)) - Math.sin(lat) * Math.sin(declination))
       / (Math.cos(lat) * Math.cos(declination))
+    if (zenith !== undefined && Math.abs(cosHourAngle) > 1) return NaN
     var hourAngle = degrees(Math.acos(Math.max(-1, Math.min(1, cosHourAngle))))
     var noon = 720 - 4 * longitude - equationOfTime
     minutes = rising ? noon - 4 * hourAngle : noon + 4 * hourAngle
@@ -398,6 +409,56 @@ function sunTimes(nowMs, latitude, longitude) {
     sunrise: midnight + sunMinutesUtc(year, month, day, latitude, longitude, true) * 60000,
     sunset: midnight + sunMinutesUtc(year, month, day, latitude, longitude, false) * 60000
   }
+}
+
+// Civil dawn and dusk on the local day of nowMs: the sun 6 degrees below the
+// horizon. NaN where it never gets that low (summer, far north).
+function twilightTimes(nowMs, latitude, longitude) {
+  var now = new Date(nowMs)
+  var year = now.getFullYear()
+  var month = now.getMonth()
+  var day = now.getDate()
+  var midnight = Date.UTC(year, month, day)
+  return {
+    dawn: midnight + sunMinutesUtc(year, month, day, latitude, longitude, true, CIVIL_ZENITH) * 60000,
+    dusk: midnight + sunMinutesUtc(year, month, day, latitude, longitude, false, CIVIL_ZENITH) * 60000
+  }
+}
+
+// Whether Sun mode's fades follow twilight.
+function followsTwilight(settings, location) {
+  return settings.twilight === true && settings.mode === "sun" && !!location
+}
+
+// How long the warm-up of the night starting at nightStart lasts: until civil
+// dusk when following twilight (so, with Start before sunset, the offset plus
+// twilight), otherwise fadeIn. Falls back to fadeIn when there's no dusk, or
+// the night starts after it.
+function fadeInMs(settings, location, nightStart) {
+  if (followsTwilight(settings, location)) {
+    var dusk = twilightTimes(nightStart, location.latitude, location.longitude).dusk
+    if (Number.isFinite(dusk) && dusk > nightStart) return dusk - nightStart
+  }
+  return settings.fadeIn * MINUTE_MS
+}
+
+// How long the clear-down before the night ends at nightEnd (sunrise) lasts:
+// from civil dawn when following twilight, otherwise fadeOut.
+function fadeOutMs(settings, location, nightEnd) {
+  if (followsTwilight(settings, location)) {
+    var dawn = twilightTimes(nightEnd, location.latitude, location.longitude).dawn
+    if (Number.isFinite(dawn) && dawn < nightEnd) return nightEnd - dawn
+  }
+  return settings.fadeOut * MINUTE_MS
+}
+
+// The fades of the night under way, or of the next one, for the panel.
+function fadeLengths(settings, location, nowMs) {
+  if (followsSwitch(settings, location)) return { inMs: settings.fadeIn * MINUTE_MS, outMs: settings.fadeOut * MINUTE_MS }
+  var schedule = scheduleAt(settings, location, nowMs)
+  var start = schedule.on ? scheduleStart(settings, location, nowMs) : schedule.next
+  var end = schedule.on ? schedule.next : scheduleAt(settings, location, schedule.next).next
+  return { inMs: fadeInMs(settings, location, start), outMs: fadeOutMs(settings, location, end) }
 }
 
 function localAt(nowMs, dayOffset, minutes) {
@@ -635,16 +696,18 @@ function rampAt(settings, location, nowMs) {
   if (settings.override && nowMs < settings.override.until) return null
   if (!desiredState(settings, location, nowMs).on) return null
   var ramp = null
-  var outMs = settings.fadeOut * MINUTE_MS
+  var nightEnd = scheduleAt(settings, location, nowMs).next
+  var outMs = fadeOutMs(settings, location, nightEnd)
   if (outMs > 0) {
-    var outProgress = (scheduleAt(settings, location, nowMs).next - nowMs) / outMs
+    var outProgress = (nightEnd - nowMs) / outMs
     // The clear-down's first instant counts, so the step after it gets scheduled.
     if (outProgress <= 1)
       ramp = { progress: Math.max(0, outProgress), lengthMs: outMs, remainingMs: Math.max(0, outProgress) * outMs, warming: false }
   }
-  var inMs = settings.fadeIn * MINUTE_MS
+  var nightStart = scheduleStart(settings, location, nowMs)
+  var inMs = fadeInMs(settings, location, nightStart)
   if (inMs > 0 && nowMs >= settings.rampSkipUntil) {
-    var inProgress = (nowMs - scheduleStart(settings, location, nowMs)) / inMs
+    var inProgress = (nowMs - nightStart) / inMs
     if (inProgress < 1 && (!ramp || inProgress < ramp.progress))
       ramp = { progress: Math.max(0, inProgress), lengthMs: inMs, remainingMs: (1 - Math.max(0, inProgress)) * inMs, warming: true }
   }
@@ -658,9 +721,10 @@ function rampAt(settings, location, nowMs) {
 function holdEndPatch(override, settings, location) {
   var patch = { override: null }
   if (!override || !override.on) return patch
-  if (settings && location !== undefined && !followsSwitch(settings, location)
-      && !scheduleAt(settings, location, override.until).on) return patch
+  var scheduled = settings && location !== undefined && !followsSwitch(settings, location)
+  if (scheduled && !scheduleAt(settings, location, override.until).on) return patch
   var warmUp = settings && Number.isFinite(settings.fadeIn) ? settings.fadeIn * MINUTE_MS : RAMP_IN_MS
+  if (scheduled) warmUp = fadeInMs(settings, location, scheduleStart(settings, location, override.until))
   patch.rampSkipUntil = override.until + warmUp
   return patch
 }
@@ -724,7 +788,10 @@ function nextDueAt(settings, location, nowMs, profileMinutes) {
   if (!followsSwitch(settings, location)) {
     var schedule = scheduleAt(settings, location, nowMs)
     due.push(schedule.next)
-    if (schedule.on && settings.ramp && settings.fadeOut > 0) due.push(schedule.next - settings.fadeOut * MINUTE_MS)
+    if (schedule.on && settings.ramp) {
+      var outMs = fadeOutMs(settings, location, schedule.next)
+      if (outMs > 0) due.push(schedule.next - outMs)
+    }
   }
   if (settings.override) due.push(settings.override.until)
   if (settings.rampSkipUntil) due.push(settings.rampSkipUntil)
@@ -977,6 +1044,8 @@ if (typeof module !== "undefined") {
     movedFar: movedFar,
     resolveLocation: resolveLocation,
     sunTimes: sunTimes,
+    twilightTimes: twilightTimes,
+    fadeLengths: fadeLengths,
     scheduleAt: scheduleAt,
     desiredState: desiredState,
     mixKelvin: mixKelvin,

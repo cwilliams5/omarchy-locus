@@ -576,17 +576,29 @@ Panel {
             onToggled: if (root.serviceReady) root.service.setRamp(!root.service.ramp)
           }
 
+          SwitchRow {
+            visible: root.mode === "sun" && root.serviceReady && root.service.ramp
+            label: strings.t("twilight")
+            checked: root.serviceReady && root.service.twilight
+            onToggled: if (root.serviceReady) root.service.setTwilight(!root.service.twilight)
+          }
+
+          // With twilight, the lengths follow the sun and only show tonight's.
           StepRow {
             visible: root.mode !== "manual" && root.serviceReady && root.service.ramp
-            label: strings.t("fade.in")
-            valueText: root.minutesText(root.serviceReady ? root.service.fadeIn : 0)
+            readonly property bool dusk: root.serviceReady && root.service.followsTwilight
+            adjustable: !dusk
+            label: dusk ? strings.t("fade.inDusk") : strings.t("fade.in")
+            valueText: root.minutesText(root.serviceReady ? (dusk ? root.service.fadeInNow : root.service.fadeIn) : 0)
             onStepped: function(direction) { if (root.serviceReady) root.service.stepFade("fadeIn", direction * root.fadeStepMinutes) }
           }
 
           StepRow {
             visible: root.mode !== "manual" && root.serviceReady && root.service.ramp
-            label: strings.t("fade.out")
-            valueText: root.minutesText(root.serviceReady ? root.service.fadeOut : 0)
+            readonly property bool dawn: root.serviceReady && root.service.followsTwilight
+            adjustable: !dawn
+            label: dawn ? strings.t("fade.outDawn") : strings.t("fade.out")
+            valueText: root.minutesText(root.serviceReady ? (dawn ? root.service.fadeOutNow : root.service.fadeOut) : 0)
             onStepped: function(direction) { if (root.serviceReady) root.service.stepFade("fadeOut", direction * root.fadeStepMinutes) }
           }
 
@@ -833,6 +845,8 @@ Panel {
 
     property string label: ""
     property string valueText: ""
+    // False shows the value alone, without the buttons.
+    property bool adjustable: true
     signal stepped(int direction)
 
     width: parent.width
@@ -860,6 +874,8 @@ Panel {
 
       Button {
         id: stepDown
+        opacity: stepRow.adjustable ? 1 : 0
+        enabled: stepRow.adjustable
         text: "−"
         bordered: true
         foreground: root.bar.foreground
@@ -881,6 +897,8 @@ Panel {
       }
 
       Button {
+        opacity: stepRow.adjustable ? 1 : 0
+        enabled: stepRow.adjustable
         text: "+"
         bordered: true
         foreground: root.bar.foreground
@@ -890,6 +908,7 @@ Panel {
     }
 
     WheelHandler {
+      enabled: stepRow.adjustable
       acceptedDevices: PointerDevice.Mouse | PointerDevice.TouchPad
       onWheel: function(event) { stepRow.stepped(event.angleDelta.y > 0 ? 1 : -1) }
     }

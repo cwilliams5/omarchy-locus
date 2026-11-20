@@ -74,6 +74,10 @@ Item {
   // Bedtime has come tonight, so the slider and presets set the bedtime level.
   // Worked out on each check, since it depends on the clock.
   property bool bedtimeNow: false
+  // The fades of the night under way or the next one, in minutes: with
+  // twilight they change with the date.
+  property int fadeInNow: 0
+  property int fadeOutNow: 0
   property real sunrise: 0
   property real sunset: 0
 
@@ -175,6 +179,9 @@ Item {
   readonly property bool dim: settings.dim
   readonly property string dimFrom: settings.dimFrom
   readonly property int dimPercent: settings.dimPercent
+  readonly property bool twilight: settings.twilight
+  // Twilight fades apply in Sun mode with a location.
+  readonly property bool followsTwilight: twilight && mode === "sun" && location !== null
   // Following a schedule, rather than the switch alone.
   readonly property bool scheduled: mode !== "manual" && !(mode === "sun" && location === null)
   // "Off until morning" needs a schedule to know when morning is.
@@ -351,6 +358,10 @@ Item {
     setWeekendDelay(weekendDelay + deltaMinutes)
   }
 
+  function setTwilight(enabled) {
+    updateSettings({ twilight: enabled === true })
+  }
+
   function setDim(enabled) {
     updateSettings({ dim: enabled === true })
   }
@@ -499,6 +510,9 @@ Item {
     }
     plan = Model.desiredState(settings, location, now)
     bedtimeNow = Model.bedtimeReached(settings, location, now)
+    var lengths = Model.fadeLengths(settings, location, now)
+    fadeInNow = Math.round(lengths.inMs / 60000)
+    fadeOutNow = Math.round(lengths.outMs / 60000)
     // Look first; step() decides what to send once hyprsunset has answered. A
     // look already under way, or the one that follows a send, does the same.
     if (!probeProcess.running && !applyProcess.running) probeProcess.running = true
@@ -967,6 +981,9 @@ Item {
         dimFrom: root.dimFrom,
         dimPercent: root.dimPercent,
         gamma: root.gammaSent,
+        twilight: root.twilight,
+        fadeInNow: root.fadeInNow,
+        fadeOutNow: root.fadeOutNow,
         sunsetOffset: root.sunsetOffset,
         fadeIn: root.fadeIn,
         fadeOut: root.fadeOut,
@@ -995,6 +1012,8 @@ Item {
       return "ok"
     }
     function bedtimetemp(kelvin: int): void { root.setBedtimeTemperature(kelvin) }
+    // Sun mode's fades follow twilight (sunset to civil dusk, civil dawn to sunrise): on or off.
+    function twilight(value: string): void { root.setTwilight(value === "on") }
     // Dimmer late at night: on, off, or the time it starts (23:30).
     function dim(value: string): string {
       if (value === "on" || value === "off") {

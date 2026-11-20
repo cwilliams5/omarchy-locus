@@ -25,6 +25,8 @@ Omarchy's own night light icon stays in the indicators widget. To leave only Loc
 
 In the panel, Left and Right change the temperature, Enter flips the switch, and `m` changes the mode.
 
+Under the hold buttons, a strip shows the day from noon to noon: when the screen warms and clears, how strong the tint is, bedtime and dimming, any hold, and a mark for now. It's worked out when the panel opens or a setting changes, so it costs nothing while the panel is closed.
+
 The modes are:
 
 - **Sun:** on from sunset to sunrise. **Start** moves the beginning up to 3 hours before sunset or 2 hours after it, in 15-minute steps.
@@ -32,6 +34,8 @@ The modes are:
 - **Manual:** stays how you set it
 
 With **Gradual** on, which is the default, Sun and Custom modes warm the screen over the hour after they turn on, and clear it over the 30 minutes before they turn off. **Warm up over** and **Clear over** change those lengths, from at once to 3 hours. Turn Gradual off to change at the scheduled time instead. Flipping the switch always takes about 2 seconds.
+
+In Sun mode, **Follow twilight** times the fades by the sky instead: the screen warms from the start until civil dusk (when the sun is 6 degrees below the horizon) and clears from civil dawn until sunrise, so the fades are longer in summer and in the far north. With **Start** before sunset, the warm-up starts that much earlier. Where the sun never gets that low, as on summer nights in the far north, the lengths you set apply.
 
 A fade moves in steps of about 3 mireds, under what the eye can tell apart, so an hour from 6500K to 3000K is about 60 steps. Locus looks at `hyprsunset` when something is due (a scheduled change, the next fade step, a switch time in `hyprsunset.conf`) and otherwise once a minute, so a change made elsewhere is noticed within a minute. It always looks before it sends anything, so it never overwrites a change it hasn't seen yet.
 
@@ -101,6 +105,7 @@ omarchy-shell $ID morning               # Off for the rest of the night
 omarchy-shell $ID resume                # End any hold
 omarchy-shell $ID offset 30             # Sun mode starts 30 min before sunset; negative is after
 omarchy-shell $ID fade 60 30            # Warm-up and clear-down in minutes, 0 to 180
+omarchy-shell $ID twilight on           # Or off: Sun mode's fades follow dusk and dawn
 omarchy-shell $ID pausefullscreen on    # Or off
 omarchy-shell $ID pauseapp gimp on      # Or off; steam_app_* matches every Steam game
 omarchy-shell $ID pausefront            # Pause for the app in front, or stop
@@ -156,6 +161,7 @@ Ideas, not code, from:
 - [Dusk](https://github.com/ReidenXerx/omarchy-dusk) by ReidenXerx (MIT): starting before sunset; a fade length you choose; stepping aside for fullscreen apps and apps you name, with a button for the app in front; spacing fade steps by what the eye can tell apart (a few mireds) and looking about once a minute; reading `hyprsunset.conf`'s own switch times so they aren't taken for you; "off until morning" and "warm for an hour"; dimming late at night, below the screen's own minimum, eased in.
 - [f.lux](https://justgetflux.com): the night light the rest descend from, including disabling for fullscreen apps, for the app in front, and for an hour; Movie mode; named colour presets like Candle; a warmer bedtime, and sleeping in at weekends.
 - [Sunset Night Light](https://github.com/agkrishnendu/omarchy-nightlight) by agkrishnendu: a second, warmer temperature later in the evening.
+- [Redshift](https://github.com/jonls/redshift) and [gammastep](https://gitlab.com/chinstrap/gammastep): changing with the sun's height through twilight rather than by the clock.
 - [Moonshine](https://github.com/tiagoabiramia/omarchy-moonshine) by Tiago Abi-Ramia: software dimming for Omarchy.
 - [Night Light](https://github.com/key-tone/omarchy-nightlight) by Kenny Keeton: pausing for an hour, or until sunrise; one-click presets, including Night at 3400K and Candle at 1900K.
 

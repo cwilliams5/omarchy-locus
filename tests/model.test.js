@@ -1306,3 +1306,85 @@ test("the view paints fades as a growing tint in the night's colour, darker wher
   const dimmed = Model.viewPaint({ kelvin: 2200, gamma: 80 }, 3000)
   assert.ok(Math.abs(dimmed.r - 0.8 * bed.r) < 1e-9 && Math.abs(dimmed.g - 0.8 * bed.g) < 1e-9)
 })
+
+// ---- Fades that follow twilight ----------------------------------------------------
+
+const dusky = (patch) => settings(Object.assign({ mode: "sun", temperature: 3000, twilight: true, fadeIn: 60, fadeOut: 30 }, patch))
+
+test("twilight fades are off by default", () => {
+  assert.strictEqual(settings({}).twilight, false)
+  assert.strictEqual(settings({ twilight: "yes" }).twilight, false)
+  const sun = sunsetOn(5)
+  assert.strictEqual(Model.rampAt(settings({ mode: "sun" }), place, sun.sunset + 10 * MIN).lengthMs, 60 * MIN)
+})
+
+test("with twilight, the warm-up runs from sunset to civil dusk and the clear-down from civil dawn", () => {
+  const s = dusky()
+  const day = at(2026, 11, 5, 12)
+  const sun = Model.sunTimes(day, place.latitude, place.longitude)
+  const civil = Model.twilightTimes(day, place.latitude, place.longitude)
+  const twilight = civil.dusk - sun.sunset
+  assert.ok(twilight > 25 * MIN && twilight < 33 * MIN, "about half an hour in November: " + twilight / MIN)
+  const warming = Model.rampAt(s, place, sun.sunset + 10 * MIN)
+  assert.strictEqual(warming.lengthMs, twilight)
+  assert.strictEqual(Model.kelvinAt(s, place, civil.dusk), 3000, "fully warm at dusk")
+  assert.ok(Model.kelvinAt(s, place, civil.dusk - MIN) > 3000)
+  const morning = Model.sunTimes(at(2026, 11, 6, 12), place.latitude, place.longitude).sunrise
+  const dawn = Model.twilightTimes(at(2026, 11, 6, 12), place.latitude, place.longitude).dawn
+  assert.strictEqual(Model.nextDueAt(s, place, dawn - 20 * MIN, []), dawn, "a check as the clear-down starts")
+  assert.strictEqual(Model.kelvinAt(s, place, dawn - MIN), 3000)
+  assert.strictEqual(Model.rampAt(s, place, dawn + MIN).lengthMs, morning - dawn)
+  assert.strictEqual(Model.kelvinAt(s, place, morning), Model.OFF_TEMP)
+})
+
+test("twilight is longer in June than in March, and Start before sunset adds to the warm-up", () => {
+  const length = (y, mo, d) => {
+    const t = at(y, mo, d, 12)
+    return Model.twilightTimes(t, place.latitude, place.longitude).dusk - Model.sunTimes(t, place.latitude, place.longitude).sunset
+  }
+  assert.ok(length(2026, 6, 21) > length(2026, 3, 20) + 3 * MIN)
+  const early = dusky({ sunsetOffset: 60 })
+  const day = at(2026, 11, 5, 12)
+  const start = Model.sunTimes(day, place.latitude, place.longitude).sunset - 60 * MIN
+  assert.strictEqual(Model.rampAt(early, place, start + MIN).lengthMs, Model.twilightTimes(day, place.latitude, place.longitude).dusk - start)
+})
+
+test("where twilight never ends, or the night starts after dusk, the set lengths apply", () => {
+  const far = { latitude: 64, longitude: -21, source: "custom", label: "" }
+  assert.ok(Number.isNaN(Model.twilightTimes(at(2026, 6, 21, 12), far.latitude, far.longitude).dusk))
+  const s = dusky()
+  const lengths = Model.fadeLengths(s, far, at(2026, 6, 21, 12))
+  assert.deepStrictEqual(lengths, { inMs: 60 * MIN, outMs: 30 * MIN })
+  const late = dusky({ sunsetOffset: -60 })
+  const start = Model.sunTimes(at(2026, 11, 5, 12), place.latitude, place.longitude).sunset + 60 * MIN
+  assert.strictEqual(Model.rampAt(late, place, start + MIN).lengthMs, 60 * MIN, "starting an hour after sunset is past dusk")
+})
+
+test("twilight is for Sun mode only", () => {
+  const custom = settings({ mode: "custom", onTime: "21:00", offTime: "07:00", twilight: true })
+  assert.strictEqual(Model.rampAt(custom, place, at(2026, 11, 5, 21, 10)).lengthMs, 60 * MIN)
+  assert.deepStrictEqual(Model.fadeLengths(custom, place, at(2026, 11, 5, 15)), { inMs: 60 * MIN, outMs: 30 * MIN })
+})
+
+test("a hold ending at a twilight night's start skips that warm-up", () => {
+  const s = dusky()
+  const day = at(2026, 11, 5, 12)
+  const sunset = Model.sunTimes(day, place.latitude, place.longitude).sunset
+  const patch = Model.holdEndPatch({ on: true, until: sunset }, s, place)
+  assert.strictEqual(patch.rampSkipUntil, Model.twilightTimes(day, place.latitude, place.longitude).dusk)
+})
+
+test("twilight fades step evenly and keep the checks down", () => {
+  const s = dusky()
+  const run = simulate(s, place, at(2026, 11, 5, 12), at(2026, 11, 6, 12))
+  for (const x of run.steps) if (x.from !== null) assert.ok(miredGap(x.from, x.to) <= 5, x.from + " to " + x.to)
+  assert.ok(run.checks.length < 1600, run.checks.length + " checks")
+  assert.strictEqual(run.last, Model.OFF_TEMP)
+  const june = simulate(s, place, at(2026, 6, 21, 12), at(2026, 6, 22, 12))
+  for (const x of june.steps) if (x.from !== null) assert.ok(miredGap(x.from, x.to) <= 5)
+  for (let minute = 0; minute < 2880; minute += 7) {
+    const now = at(2026, 11, 5, 0, minute) + 1234
+    const due = Model.nextDueAt(s, place, now, [420])
+    assert.ok(due !== null && due > now, "nothing due in the past at minute " + minute)
+  }
+})
