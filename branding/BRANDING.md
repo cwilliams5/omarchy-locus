@@ -83,6 +83,12 @@ palette is for the logo, README art and the social preview, not the panel.
 - **It reads at 16px.**
 - **Drawn as paths:** no fonts needed.
 - **`build.py` regenerates everything:** `python3 branding/build.py`.
+- **In the bar and the panel header** the mark is drawn in QML
+  (`ArcIcon.qml`, the same 64-unit geometry), so it follows the theme like
+  every other bar icon: the arc in the bar's colour, the point in the theme's
+  accent while the night light is on, everything dimmed while it's off. The
+  bar uses a stroke of 8 units instead of 6, because at about 12 px wide
+  6 is barely more than a pixel.
 
 ## Files
 

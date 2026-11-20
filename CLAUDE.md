@@ -65,6 +65,7 @@ Model.js           all the logic that can be tested: sun times, schedules,
 Service.qml        the one part that talks to hyprsunset: checks, decides,
                    sends, holds, pausing, the IPC commands
 Panel.qml          the bar icon and its panel
+ArcIcon.qml        the Locus mark drawn in QML, for the bar icon and the panel header
 Indicator.qml      optional: the icon among Omarchy's indicators instead
 Registry.js        hands the service to widgets under replacement bars
 warm-shader.sh     the screen shader for temperatures below 1000K

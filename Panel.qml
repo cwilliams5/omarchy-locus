@@ -152,7 +152,13 @@ Panel {
     anchors.fill: parent
     visible: root.showIcon
     bar: root.bar
-    text: "󰔎"
+    iconComponent: Component {
+      ArcIcon {
+        stroke: 8
+        color: button.foreground
+        pointColor: root.nightOn ? Commons.Color.accent : button.foreground
+      }
+    }
     dimmed: !root.nightOn
     tooltipText: root.serviceReady && root.service.pausedNow
       ? strings.t("tooltip.paused").arg(root.service.frontLabel)
@@ -223,12 +229,11 @@ Panel {
           fontFamily: root.bar.fontFamily
           iconOpacity: root.nightOn ? 1.0 : 0.5
           iconComponent: Component {
-            Text {
-              textFormat: Text.PlainText
-              text: "󰔎"
+            ArcIcon {
+              size: Style.font.display
+              stroke: 7
               color: root.bar.foreground
-              font.family: root.bar.fontFamily
-              font.pixelSize: Style.font.display
+              pointColor: root.nightOn ? Commons.Color.accent : root.bar.foreground
             }
           }
           trailingControl: Component {
