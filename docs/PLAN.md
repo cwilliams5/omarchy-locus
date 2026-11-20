@@ -24,7 +24,7 @@ in the same commit as the work.
 
 - **2026-11-19, end of session 1:** A1, A2, B1 done, merged, pushed, tested
   live; the installed copy is on `main`; dotfiles updated.
-- **2026-11-19, session 2:** B2 done. **Next: B3.**
+- **2026-11-19, session 2:** B2, B3 done. **Next: B4.**
 - Cody's live Locus state at that point: Sun mode, 3000K, and a hold "off
   until morning" (ends at sunrise, 6:30 AM on 2026-11-20). If a test changes
   the hold at night, put it back with
@@ -65,7 +65,7 @@ Phase B, features that cost nothing to run:
 
 - [x] B1. Holds for a set time ("off for an hour", "warm for an hour") (8ae66f3, tested live: holds, expiry, resume, the panel)
 - [x] B2. Presets, and Movie mode (88a000d, tested live: presets, Movie mode, a temperature chosen during it, the panel; also fixed B1's warm hold ending in the day skipping that evening's warm-up)
-- [ ] B3. Bedtime level, with weekend sleep-in
+- [x] B3. Bedtime level, with weekend sleep-in (b74bb74, tested live: bedtime on, its level mid-fade, the slider setting the bedtime level after bedtime, bad input, the panel)
 - [ ] B4. Late-night dimming
 - [ ] B5. The Arc mark as the bar icon
 - [ ] B6. A 24-hour view of the night in the panel
@@ -159,6 +159,12 @@ Gotchas met so far:
   heads for now (the hold's temperature, else the saved one). Anything that
   compares against "the temperature" (the service's `step`, simulations)
   must use `targetKelvin`, not `settings.temperature`.
+- **Bedtime** (B3): `bedtimeAt` (the night's bedtime fade: `{start, lengthMs}`),
+  `bedtimeReached`; `exactTargetKelvin` is unrounded so a warm-up mixed with
+  bedtime's fade rounds once (rounding twice made 5.8-mired steps);
+  `fadeStepMs` adds the rates of overlapping fades. B4's dimming is a third
+  thing that changes over the night: give it its own `…At` function the
+  same way, and add its rate and edges to `fadeStepMs` / `nextDueAt`.
 - Screenshots: Cody's Bitwarden window blanks itself out of screen captures
   (a black rectangle), even under the panel. Don't move it; read around it.
 
