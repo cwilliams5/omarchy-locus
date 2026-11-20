@@ -68,6 +68,7 @@ Registry.js        hands the service to widgets under replacement bars
 warm-shader.sh     the screen shader for temperatures below 1000K
 i18n/en.json       the panel's strings (Omarchy picks the language)
 tests/model.test.js  node tests for Model.js
+docs/PLAN.md       the development plan and its status list
 branding/          the name, logo and palette (BRANDING.md, build.py)
 icon.svg           the app tile
 ```
@@ -202,9 +203,10 @@ temperatures as `3000K`). Commit messages say what changed and why.
 ## Status and open ideas (2026-11-19)
 
 The go-public run (Cody's skill) has done naming, logo and branding, and is
-**paused for development**. Next, in order: the features below, then the
-README with screenshots, publishing (the repo is private until then), and
-the marketplace.
+**paused for development**. **The working plan, with designs, order and a
+status list, is `docs/PLAN.md`: read it before starting work.** After the
+features: the README with screenshots, publishing (the repo is private until
+then), and the marketplace. The summary below is the short version.
 
 Planned, all free to run:
 
