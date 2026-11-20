@@ -29,7 +29,9 @@ Panel {
   readonly property bool switchOn: serviceReady && service.switchOn
   readonly property bool previewing: serviceReady && service.previewing
   readonly property string mode: serviceReady ? service.mode : "sun"
-  readonly property int temperature: serviceReady ? service.temperature : 3000
+  // The temperature showing now: the bedtime one once bedtime has come.
+  readonly property int temperature: serviceReady ? service.activeTemperature : 3000
+  readonly property bool bedtimeNow: serviceReady && service.bedtimeNow
   readonly property int shownTemp: serviceReady && service.actualTemp !== null ? service.actualTemp : temperature
   readonly property real untilMs: serviceReady ? service.plan.until : 0
 
@@ -118,6 +120,10 @@ Panel {
   // Minutes as the steppers show them, like "45 min" or "At once".
   function minutesText(minutes) {
     return minutes > 0 ? strings.t("fade.minutes").arg(Commons.I18n.formatNumber(minutes, 0)) : strings.t("fade.instant")
+  }
+
+  function weekendText(minutes) {
+    return minutes > 0 ? strings.t("bedtime.later").arg(Commons.I18n.formatNumber(minutes, 0)) : strings.t("bedtime.same")
   }
 
   function offsetText(minutes) {
@@ -303,7 +309,7 @@ Panel {
 
             PanelSectionHeader {
               id: temperatureHeader
-              text: strings.t("temperature")
+              text: root.bedtimeNow ? strings.t("bedtime.temperatureNow") : strings.t("temperature")
               foreground: root.bar.foreground
               fontFamily: root.bar.fontFamily
               anchors.left: parent.left
@@ -520,6 +526,45 @@ Panel {
               root.editingLocation = false
               keys.forceActiveFocus()
             }
+          }
+        }
+
+        PanelSeparator {
+          visible: root.mode !== "manual"
+          foreground: root.bar.foreground
+        }
+
+        // A second, warmer level later in the night.
+        Column {
+          width: parent.width
+          spacing: Style.space(10)
+          visible: root.mode !== "manual"
+
+          SwitchRow {
+            label: strings.t("bedtime.level")
+            checked: root.serviceReady && root.service.bedtime
+            onToggled: if (root.serviceReady) root.service.setBedtime(!root.service.bedtime)
+          }
+
+          TimeRow {
+            visible: root.serviceReady && root.service.bedtime
+            label: strings.t("bedtime.at")
+            timeKey: "bedtimeAt"
+            timeValue: root.serviceReady ? root.service.bedtimeAt : ""
+          }
+
+          StepRow {
+            visible: root.serviceReady && root.service.bedtime
+            label: strings.t("bedtime.temperature")
+            valueText: strings.t("kelvin").arg(root.serviceReady ? root.service.bedtimeTemperature : 2200)
+            onStepped: function(direction) { if (root.serviceReady) root.service.stepBedtimeTemperature(direction * root.stepTemp) }
+          }
+
+          StepRow {
+            visible: root.serviceReady && root.service.bedtime
+            label: strings.t("bedtime.weekend")
+            valueText: root.weekendText(root.serviceReady ? root.service.weekendDelay : 0)
+            onStepped: function(direction) { if (root.serviceReady) root.service.stepWeekendDelay(direction * root.stepMinutes) }
           }
         }
 

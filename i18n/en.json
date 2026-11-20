@@ -51,5 +51,12 @@
   "preset.mild": "Mild",
   "preset.night": "Night",
   "preset.warm": "Warm",
-  "preset.candle": "Candle"
+  "preset.candle": "Candle",
+  "bedtime.level": "Warmer from bedtime",
+  "bedtime.at": "Bedtime",
+  "bedtime.temperature": "Bedtime level",
+  "bedtime.temperatureNow": "Bedtime temperature",
+  "bedtime.weekend": "Fri and Sat nights",
+  "bedtime.later": "%1 min later",
+  "bedtime.same": "Same time"
 }

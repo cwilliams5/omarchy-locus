@@ -39,6 +39,8 @@ Flipping the switch during a schedule holds until the next scheduled change, eve
 
 Under the slider, **Mild**, **Night**, **Warm** and **Candle** set 4500K, 3400K, 2700K and 1900K in one click. Moving the slider while the night light is off previews that temperature for 10 seconds.
 
+**Warmer from bedtime** adds a second, warmer level later in the night, in Sun and Custom modes. From **Bedtime** (22:30 unless you change it), the screen moves to the **Bedtime level** (2200K) over the warm-up length, or at once with Gradual off. Nights that start on a Friday or Saturday reach bedtime later (**Fri and Sat nights**, an hour unless you change it). A bedtime after midnight counts for the night before it, and one that has already passed when the night starts covers the whole night. Once bedtime has come, the slider, the presets and scrolling on the icon change the bedtime level.
+
 `hyprsunset` stops at 1000K, and on some screens that is more orange than red. Below 1000K, Locus leaves `hyprsunset` there and adds a Hyprland screen shader that takes away more green and blue, until 500K shows only red. A screen shader you already use, like a grayscale one, keeps working underneath. The shader goes away on a config reload and comes back within a minute.
 
 `omarchy toggle nightlight` still works. It uses Omarchy's fixed 4000K, and that stays until the next scheduled change, even during a gradual change.
@@ -88,6 +90,9 @@ omarchy-shell $ID ramp off              # Or on: change gradually
 omarchy-shell $ID autolocation on       # Or off: detect location from your IP
 omarchy-shell $ID hold off 60           # Off for 60 minutes; or hold on 60: warm for 60
 omarchy-shell $ID movie                 # 5000K for 2.5 hours; or hold movie 100 for 100 minutes
+omarchy-shell $ID bedtime on            # Or off, or a time: bedtime 22:30
+omarchy-shell $ID bedtimetemp 2200      # The bedtime level
+omarchy-shell $ID weekend 60            # Bedtime this much later on Friday and Saturday nights
 omarchy-shell $ID morning               # Off for the rest of the night
 omarchy-shell $ID resume                # End any hold
 omarchy-shell $ID offset 30             # Sun mode starts 30 min before sunset; negative is after
@@ -145,7 +150,8 @@ Locus is a hard fork of [Sundown](https://github.com/WilliamJohnDavisIII/omarchy
 Ideas, not code, from:
 
 - [Dusk](https://github.com/ReidenXerx/omarchy-dusk) by ReidenXerx (MIT): starting before sunset; a fade length you choose; stepping aside for fullscreen apps and apps you name, with a button for the app in front; spacing fade steps by what the eye can tell apart (a few mireds) and looking about once a minute; reading `hyprsunset.conf`'s own switch times so they aren't taken for you; "off until morning" and "warm for an hour".
-- [f.lux](https://justgetflux.com): the night light the rest descend from, including disabling for fullscreen apps, for the app in front, and for an hour; Movie mode; named colour presets like Candle.
+- [f.lux](https://justgetflux.com): the night light the rest descend from, including disabling for fullscreen apps, for the app in front, and for an hour; Movie mode; named colour presets like Candle; a warmer bedtime, and sleeping in at weekends.
+- [Sunset Night Light](https://github.com/agkrishnendu/omarchy-nightlight) by agkrishnendu: a second, warmer temperature later in the evening.
 - [Night Light](https://github.com/key-tone/omarchy-nightlight) by Kenny Keeton: pausing for an hour, or until sunrise; one-click presets, including Night at 3400K and Candle at 1900K.
 
 ## License

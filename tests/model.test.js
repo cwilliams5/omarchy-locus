@@ -411,9 +411,9 @@ test("Movie mode is milder for two and a half hours, then the schedule again", (
   assert.deepStrictEqual(held.override, patch.override, "the temperature survives saving")
   assert.strictEqual(Model.kelvinAt(held, place, now + MIN), 5000)
   assert.strictEqual(Model.kelvinAt(held, place, now + 149 * MIN), 5000)
-  assert.strictEqual(Model.targetKelvin(held, now + MIN), 5000)
+  assert.strictEqual(Model.targetKelvin(held, place, now + MIN), 5000)
   assert.strictEqual(Model.kelvinAt(held, place, now + 150 * MIN), 2000, "back to the night's temperature")
-  assert.strictEqual(Model.targetKelvin(held, now + 150 * MIN), 2000)
+  assert.strictEqual(Model.targetKelvin(held, place, now + 150 * MIN), 2000)
   assert.strictEqual(Model.nextDueAt(held, place, now + 60 * MIN, []), now + 150 * MIN, "and a check comes then")
   assert.strictEqual(Model.kelvinAt(held, place, now + MIN, true), Model.OFF_TEMP, "a paused app still wins")
 })
@@ -436,15 +436,15 @@ test("choosing a temperature during Movie mode shows it for the rest of the hold
   const s = settings({ mode: "custom", onTime: "21:00", offTime: "07:00", temperature: 2000 })
   const now = at(2026, 11, 5, 21, 30)
   const film = settings(Object.assign({}, s, Model.holdPatch(s, place, now, "movie")))
-  const patch = Model.temperaturePatch(film, 2700, now + 10 * MIN)
+  const patch = Model.temperaturePatch(film, place, 2700, now + 10 * MIN)
   assert.deepStrictEqual(patch, { temperature: 2700, override: { on: true, until: now + 150 * MIN } })
   const after = settings(Object.assign({}, film, patch))
   assert.strictEqual(Model.kelvinAt(after, place, now + 11 * MIN), 2700)
   assert.strictEqual(Model.desiredState(after, place, now + 149 * MIN).until, now + 150 * MIN, "the hold keeps its end")
   // Any other time it saves the temperature and nothing else.
-  assert.deepStrictEqual(Model.temperaturePatch(s, 9000, now), { temperature: Model.MAX_TEMP })
+  assert.deepStrictEqual(Model.temperaturePatch(s, place, 9000, now), { temperature: Model.MAX_TEMP })
   const off = settings(Object.assign({}, s, Model.holdPatch(s, place, now, "off", 60)))
-  assert.deepStrictEqual(Model.temperaturePatch(off, 2700, now), { temperature: 2700 })
+  assert.deepStrictEqual(Model.temperaturePatch(off, place, 2700, now), { temperature: 2700 })
 })
 
 test("a hold's own temperature is checked, and only a warm hold keeps one", () => {
@@ -455,7 +455,7 @@ test("a hold's own temperature is checked, and only a warm hold keeps one", () =
   assert.deepStrictEqual(settings({ override: { on: false, until, temperature: 4000 } }).override, { on: false, until })
   // A plain warm hold ("Warm 1 h") still uses the saved temperature.
   const warm = settings({ temperature: 2200, override: { on: true, until } })
-  assert.strictEqual(Model.targetKelvin(warm, until - MIN), 2200)
+  assert.strictEqual(Model.targetKelvin(warm, place, until - MIN), 2200)
 })
 
 test("a warm hold ending in the day leaves that evening's warm-up alone", () => {
@@ -769,7 +769,7 @@ function simulate(s, location, from, to, profileMinutes) {
   while (now < to) {
     checks.push(now)
     const level = Model.kelvinAt(s, location, now)
-    if (Model.isVisibleStep(last, level, Model.targetKelvin(s, now))) {
+    if (Model.isVisibleStep(last, level, Model.restingKelvin(s, location, now))) {
       steps.push({ at: now, from: last, to: level })
       last = level
     }
@@ -968,3 +968,178 @@ if (process.env.SUN_FIXTURE) {
     console.log("   compared " + fixture.length + " days")
   })
 }
+
+// ---- Bedtime ---------------------------------------------------------------------
+
+// Thursday 5 November 2026 to Sunday the 8th; the 1st is the night the clocks go back.
+const bedNight = (patch) => settings(Object.assign({ mode: "custom", onTime: "21:00", offTime: "07:00", temperature: 3000,
+  bedtime: true, bedtimeAt: "22:30", bedtimeTemperature: 2200, weekendDelay: 60, fadeIn: 60, fadeOut: 30 }, patch))
+const steadySteps = (run, s) => run.steps.filter((x) => x.from !== null)
+  .forEach((x) => assert.ok(miredGap(x.from, x.to) <= 5, "a step the eye could catch: " + x.from + " to " + x.to + " at " + new Date(x.at).toString()))
+
+test("bedtime is off by default and changes nothing until turned on", () => {
+  const s = settings({ mode: "custom", onTime: "21:00", offTime: "07:00", temperature: 3000 })
+  assert.strictEqual(s.bedtime, false)
+  assert.strictEqual(s.bedtimeAt, "22:30")
+  assert.strictEqual(s.bedtimeTemperature, 2200)
+  assert.strictEqual(s.weekendDelay, 60)
+  assert.strictEqual(Model.bedtimeAt(s, place, at(2026, 11, 5, 23)), null)
+  assert.strictEqual(Model.kelvinAt(s, place, at(2026, 11, 6, 2)), 3000)
+})
+
+test("bedtime settings are checked and clamped field by field", () => {
+  const s = settings({ bedtime: "yes", bedtimeAt: "25:00", bedtimeTemperature: 99999, weekendDelay: 1000 })
+  assert.strictEqual(s.bedtime, false)
+  assert.strictEqual(s.bedtimeAt, "22:30")
+  assert.strictEqual(s.bedtimeTemperature, Model.MAX_TEMP)
+  assert.strictEqual(s.weekendDelay, Model.MAX_WEEKEND_DELAY)
+  const t = settings({ bedtime: true, bedtimeAt: "7:05", bedtimeTemperature: 100, weekendDelay: -30 })
+  assert.deepStrictEqual([t.bedtime, t.bedtimeAt, t.bedtimeTemperature, t.weekendDelay], [true, "07:05", Model.MIN_TEMP, 0])
+})
+
+test("from bedtime the night warms to the bedtime level over the warm-up length", () => {
+  const s = bedNight()
+  assert.strictEqual(Model.kelvinAt(s, place, at(2026, 11, 5, 22)), 3000)
+  assert.strictEqual(Model.nextDueAt(s, place, at(2026, 11, 5, 22), []), at(2026, 11, 5, 22, 30), "a check at bedtime")
+  assert.strictEqual(Model.kelvinAt(s, place, at(2026, 11, 5, 22, 30)), 3000)
+  const halfway = Model.kelvinAt(s, place, at(2026, 11, 5, 23))
+  assert.ok(halfway < 3000 && halfway > 2200, String(halfway))
+  assert.ok(Math.abs(miredGap(3000, halfway) - miredGap(halfway, 2200)) < 1, "even to the eye")
+  assert.strictEqual(Model.kelvinAt(s, place, at(2026, 11, 5, 23, 30)), 2200)
+  assert.strictEqual(Model.kelvinAt(s, place, at(2026, 11, 6, 3)), 2200)
+  const clearing = Model.kelvinAt(s, place, at(2026, 11, 6, 6, 45))
+  assert.ok(clearing > 2200 && clearing < Model.OFF_TEMP, "the morning clears from the bedtime level")
+  assert.strictEqual(Model.kelvinAt(s, place, at(2026, 11, 6, 7)), Model.OFF_TEMP)
+  assert.strictEqual(Model.restingKelvin(s, place, at(2026, 11, 5, 22)), 3000)
+  assert.strictEqual(Model.restingKelvin(s, place, at(2026, 11, 5, 22, 45)), 2200, "a fade lands on where it's heading")
+})
+
+test("Friday and Saturday nights reach bedtime later", () => {
+  const s = bedNight()
+  assert.strictEqual(Model.bedtimeAt(s, place, at(2026, 11, 5, 23)).start, at(2026, 11, 5, 22, 30), "Thursday")
+  assert.strictEqual(Model.bedtimeAt(s, place, at(2026, 11, 6, 23)).start, at(2026, 11, 6, 23, 30), "Friday")
+  assert.strictEqual(Model.bedtimeAt(s, place, at(2026, 11, 8, 2)).start, at(2026, 11, 7, 23, 30), "Saturday, after midnight")
+  assert.strictEqual(Model.bedtimeAt(s, place, at(2026, 11, 8, 23)).start, at(2026, 11, 8, 22, 30), "Sunday")
+  assert.strictEqual(Model.kelvinAt(s, place, at(2026, 11, 6, 23)), 3000)
+  const none = bedNight({ weekendDelay: 0 })
+  assert.strictEqual(Model.bedtimeAt(none, place, at(2026, 11, 6, 23)).start, at(2026, 11, 6, 22, 30))
+})
+
+test("a bedtime after midnight belongs to the night before", () => {
+  const s = bedNight({ bedtimeAt: "00:30" })
+  assert.strictEqual(Model.bedtimeAt(s, place, at(2026, 11, 5, 21, 30)).start, at(2026, 11, 6, 0, 30))
+  assert.strictEqual(Model.kelvinAt(s, place, at(2026, 11, 5, 23, 59)), 3000)
+  assert.strictEqual(Model.kelvinAt(s, place, at(2026, 11, 6, 2)), 2200)
+  // A night that starts after midnight still finds its bedtime.
+  const late = bedNight({ onTime: "01:00", bedtimeAt: "02:00" })
+  assert.strictEqual(Model.bedtimeAt(late, place, at(2026, 11, 6, 1, 30)).start, at(2026, 11, 6, 2))
+})
+
+test("a bedtime already past when the night starts covers the whole night", () => {
+  const custom = bedNight({ onTime: "23:00" })
+  assert.deepStrictEqual(Model.bedtimeAt(custom, place, at(2026, 11, 5, 23, 10)), { start: at(2026, 11, 5, 23), lengthMs: 0 })
+  assert.strictEqual(Model.kelvinAt(custom, place, at(2026, 11, 6, 0, 30)), 2200)
+  const warming = Model.kelvinAt(custom, place, at(2026, 11, 5, 23, 30))
+  assert.ok(warming < Model.OFF_TEMP && warming > 2200, "the warm-up heads straight for the bedtime level")
+  // Sun mode, with a bedtime an hour before sunset.
+  const sunset = sunsetOn(5).sunset
+  const early = new Date(sunset - 60 * MIN)
+  const sun = bedNight({ mode: "sun", bedtimeAt: String(early.getHours()).padStart(2, "0") + ":" + String(early.getMinutes()).padStart(2, "0") })
+  assert.strictEqual(Model.kelvinAt(sun, place, sunset + 61 * MIN), 2200)
+  const run = simulate(sun, place, sunset - 10 * MIN, sunset + 70 * MIN)
+  steadySteps(run, sun)
+  assert.strictEqual(run.last, 2200)
+})
+
+test("a bedtime after the night ends is ignored", () => {
+  const s = bedNight({ onTime: "18:00", offTime: "22:00" })
+  assert.strictEqual(Model.bedtimeAt(s, place, at(2026, 11, 5, 21)), null)
+  assert.strictEqual(Model.kelvinAt(s, place, at(2026, 11, 5, 21)), 3000)
+})
+
+test("bedtime needs a schedule and the night light on", () => {
+  const night = at(2026, 11, 5, 23, 45)
+  assert.strictEqual(Model.kelvinAt(bedNight({ mode: "manual", manualOn: true }), place, night), 3000, "Manual mode")
+  assert.strictEqual(Model.kelvinAt(bedNight({ mode: "sun", manualOn: true }), null, night), 3000, "Sun mode with no location")
+  const s = bedNight()
+  const off = settings(Object.assign({}, s, Model.holdPatch(s, place, at(2026, 11, 5, 23), "off", 60)))
+  assert.strictEqual(Model.kelvinAt(off, place, night), Model.OFF_TEMP)
+  assert.strictEqual(Model.bedtimeAt(off, place, night), null)
+  assert.strictEqual(Model.kelvinAt(s, place, night, true), Model.OFF_TEMP, "a paused app still wins")
+})
+
+test("holds at bedtime: warm keeps the bedtime level, Movie mode is milder, then bedtime again", () => {
+  const s = bedNight()
+  const warm = settings(Object.assign({}, s, Model.holdPatch(s, place, at(2026, 11, 5, 23, 40), "on", 60)))
+  assert.strictEqual(Model.kelvinAt(warm, place, at(2026, 11, 5, 23, 45)), 2200)
+  const film = settings(Object.assign({}, s, Model.holdPatch(s, place, at(2026, 11, 5, 22), "movie")))
+  assert.strictEqual(Model.kelvinAt(film, place, at(2026, 11, 5, 23, 45)), 5000)
+  assert.strictEqual(Model.restingKelvin(film, place, at(2026, 11, 5, 23, 45)), 5000)
+  const after = settings(Object.assign({}, film, Model.holdEndPatch(film.override, film, place)))
+  assert.strictEqual(Model.kelvinAt(after, place, at(2026, 11, 6, 0, 30)), 2200)
+})
+
+test("Gradual off reaches the bedtime level at once", () => {
+  const s = bedNight({ ramp: false })
+  assert.deepStrictEqual(Model.bedtimeAt(s, place, at(2026, 11, 5, 22)), { start: at(2026, 11, 5, 22, 30), lengthMs: 0 })
+  assert.strictEqual(Model.kelvinAt(s, place, at(2026, 11, 5, 22, 29)), 3000)
+  assert.strictEqual(Model.kelvinAt(s, place, at(2026, 11, 5, 22, 30)), 2200)
+})
+
+test("the temperature chosen after bedtime is the bedtime one", () => {
+  const s = bedNight()
+  assert.deepStrictEqual(Model.temperaturePatch(s, place, 2700, at(2026, 11, 5, 22)), { temperature: 2700 })
+  assert.deepStrictEqual(Model.temperaturePatch(s, place, 1900, at(2026, 11, 5, 22, 40)), { bedtimeTemperature: 1900 })
+  assert.strictEqual(Model.bedtimeReached(s, place, at(2026, 11, 5, 22, 29)), false)
+  assert.strictEqual(Model.bedtimeReached(s, place, at(2026, 11, 5, 22, 30)), true)
+  assert.strictEqual(Model.bedtimeReached(s, place, at(2026, 11, 6, 12)), false, "not in the day")
+})
+
+test("a night with bedtime steps evenly and still checks about once a minute", () => {
+  const s = bedNight()
+  const day = simulate(s, place, at(2026, 11, 5, 12), at(2026, 11, 6, 12))
+  steadySteps(day, s)
+  assert.ok(day.checks.length < 1600, day.checks.length + " checks")
+  const bedFade = day.steps.filter((x) => x.at > at(2026, 11, 5, 22, 29) && x.at <= at(2026, 11, 5, 23, 31))
+  assert.ok(bedFade.length >= 30 && bedFade.length <= 50, bedFade.length + " steps from 3000K to 2200K")
+  assert.strictEqual(bedFade[bedFade.length - 1].to, 2200)
+  assert.ok(bedFade[bedFade.length - 1].at - at(2026, 11, 5, 23, 30) < 2000, "lands as the fade ends")
+  assert.strictEqual(day.last, Model.OFF_TEMP)
+})
+
+test("bedtime overlapping the warm-up or the clear-down still steps evenly", () => {
+  const early = bedNight({ bedtimeAt: "21:30" })
+  steadySteps(simulate(early, place, at(2026, 11, 5, 20, 50), at(2026, 11, 5, 23)), early)
+  const short = bedNight({ onTime: "21:00", offTime: "23:00", fadeOut: 45 })
+  const run = simulate(short, place, at(2026, 11, 5, 20, 50), at(2026, 11, 5, 23, 10))
+  steadySteps(run, short)
+  assert.strictEqual(run.last, Model.OFF_TEMP)
+  const deep = bedNight({ bedtimeTemperature: 1000, fadeIn: 30 })
+  steadySteps(simulate(deep, place, at(2026, 11, 5, 22), at(2026, 11, 5, 23, 30)), deep)
+})
+
+test("bedtime on the night the clocks go back", () => {
+  // Saturday 31 October: a weekend night, so bedtime is 23:30; at 02:00 the clocks go back to 01:00.
+  const s = bedNight()
+  assert.strictEqual(Model.bedtimeAt(s, place, at(2026, 10, 31, 23)).start, at(2026, 10, 31, 23, 30))
+  const run = simulate(s, place, at(2026, 10, 31, 20), at(2026, 11, 1, 8))
+  steadySteps(run, s)
+  assert.strictEqual(Model.kelvinAt(s, place, at(2026, 11, 1, 1, 30)), 2200)
+  assert.strictEqual(run.last, Model.OFF_TEMP)
+  const late = bedNight({ bedtimeAt: "01:30", weekendDelay: 0 })
+  const lateRun = simulate(late, place, at(2026, 10, 31, 20), at(2026, 11, 1, 8))
+  steadySteps(lateRun, late)
+  assert.ok(lateRun.steps.some((x) => x.to === 2200), "reaches the bedtime level")
+})
+
+test("nothing due is ever in the past, with bedtime too", () => {
+  const all = [bedNight(), bedNight({ bedtimeAt: "00:30", ramp: false }), bedNight({ mode: "sun", bedtimeAt: "16:00" }),
+    bedNight({ mode: "sun", sunsetOffset: 120, fadeIn: 180, bedtimeAt: "18:00" }), bedNight({ onTime: "18:00", offTime: "22:00" })]
+  for (const s of all) {
+    for (let minute = 0; minute < 2880; minute += 7) {
+      const now = at(2026, 11, 5, 0, minute) + 1234
+      const due = Model.nextDueAt(s, place, now, [420])
+      assert.ok(due !== null && due > now, s.mode + " " + s.bedtimeAt + " at minute " + minute)
+    }
+  }
+})

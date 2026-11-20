@@ -40,6 +40,7 @@ var PRESETS = [
 // Movie mode, after f.lux: milder for long enough to watch a film, then the schedule again.
 var MOVIE_TEMP = 5000
 var MOVIE_MINUTES = 150
+var MAX_WEEKEND_DELAY = 180
 var PAUSE_APPS_MAX = 32
 var APP_NAME_MAX = 64
 
@@ -69,7 +70,12 @@ function defaultSettings() {
     fadeIn: RAMP_IN_MS / MINUTE_MS,
     fadeOut: RAMP_OUT_MS / MINUTE_MS,
     pauseFullscreen: false,
-    pauseApps: []
+    pauseApps: [],
+    // A second, warmer level later in the night (f.lux's bedtime).
+    bedtime: false,
+    bedtimeAt: "22:30",
+    bedtimeTemperature: 2200,
+    weekendDelay: 60 // Minutes later when the night starts on a Friday or Saturday
   }
 }
 
@@ -79,7 +85,8 @@ function defaultSettings() {
 // is never tracked. Every key of defaultSettings has exactly one home; a test
 // enforces it, so a new setting can't be added without picking one.
 var SETTING_KEYS = ["mode", "temperature", "onTime", "offTime", "ramp", "fadeIn", "fadeOut",
-                    "sunsetOffset", "pauseFullscreen", "pauseApps", "autoLocation"]
+                    "sunsetOffset", "pauseFullscreen", "pauseApps", "autoLocation",
+                    "bedtime", "bedtimeAt", "bedtimeTemperature", "weekendDelay"]
 var STATE_KEYS = ["manualOn", "override", "rampSkipUntil", "latitude", "longitude", "detected"]
 
 function pickKeys(object, keys) {
@@ -248,6 +255,10 @@ function normalizeSettings(raw) {
   if (Number.isFinite(raw.fadeOut)) result.fadeOut = clampInt(raw.fadeOut, 0, MAX_FADE_MINUTES)
   if (typeof raw.pauseFullscreen === "boolean") result.pauseFullscreen = raw.pauseFullscreen
   result.pauseApps = appList(raw.pauseApps)
+  if (typeof raw.bedtime === "boolean") result.bedtime = raw.bedtime
+  if (parseTime(raw.bedtimeAt) !== null) result.bedtimeAt = formatTime(parseTime(raw.bedtimeAt))
+  if (Number.isFinite(raw.bedtimeTemperature)) result.bedtimeTemperature = clampTemp(raw.bedtimeTemperature)
+  if (Number.isFinite(raw.weekendDelay)) result.weekendDelay = clampInt(raw.weekendDelay, 0, MAX_WEEKEND_DELAY)
   return result
 }
 
@@ -453,18 +464,84 @@ var FINE_ROUNDING_BELOW = 2500
 function mixKelvin(from, to, progress) {
   if (progress <= 0) return from
   if (progress >= 1) return to
-  var kelvin = 1000000 / (1000000 / from + progress * (1000000 / to - 1000000 / from))
+  return roundKelvin(exactMix(from, to, progress))
+}
+
+function exactMix(from, to, progress) {
+  var share = Math.max(0, Math.min(1, progress))
+  return 1000000 / (1000000 / from + share * (1000000 / to - 1000000 / from))
+}
+
+function roundKelvin(kelvin) {
   var unit = kelvin < FINE_ROUNDING_BELOW ? 1 : 10
   var rounded = Math.round(kelvin / unit) * unit
   return rounded === FRESH_TEMP ? rounded + 10 : rounded
 }
 
-// The temperature the night light is heading for: a hold's own (Movie mode)
-// while it lasts, otherwise the saved one.
-function targetKelvin(settings, nowMs) {
+// A whole number of Kelvin (a saved temperature, or a fade's end) goes out as it
+// is; anything in between is rounded as mixKelvin rounds it.
+function sendableKelvin(kelvin) {
+  return Number.isInteger(kelvin) && kelvin !== FRESH_TEMP ? kelvin : roundKelvin(kelvin)
+}
+
+function movieKelvin(settings, nowMs) {
   var override = settings.override
   if (override && nowMs < override.until && override.on && Number.isFinite(override.temperature)) return override.temperature
-  return settings.temperature
+  return null
+}
+
+// Bedtime in the night under way: when its fade starts and how long it takes
+// (0 for at once, as with Gradual off). The bedtime is the clock time nearest
+// the night's start, within 12 hours either way, so 00:30 belongs to the night
+// that started the evening before; one already past when the night starts
+// covers the whole night. Nights starting on a Friday or Saturday evening
+// move it weekendDelay minutes later. Null when there's none: bedtime off, no
+// schedule, the night light held off, or bedtime falling after the night ends.
+function bedtimeAt(settings, location, nowMs) {
+  if (!settings.bedtime || followsSwitch(settings, location)) return null
+  if (!desiredState(settings, location, nowMs).on) return null
+  var schedule = scheduleAt(settings, location, nowMs)
+  if (!schedule.on) return null
+  var nightStart = scheduleStart(settings, location, nowMs)
+  var evening = nightStart - 12 * 3600000
+  var at = nextClock(evening, parseTime(settings.bedtimeAt))
+  var weekday = new Date(evening).getDay()
+  if (weekday === 5 || weekday === 6) at += settings.weekendDelay * MINUTE_MS
+  if (at >= schedule.next) return null
+  if (at <= nightStart) return { start: nightStart, lengthMs: 0 }
+  return { start: at, lengthMs: settings.ramp ? settings.fadeIn * MINUTE_MS : 0 }
+}
+
+// Whether bedtime has come (its fade may still be under way).
+function bedtimeReached(settings, location, nowMs) {
+  var bed = bedtimeAt(settings, location, nowMs)
+  return bed !== null && nowMs >= bed.start
+}
+
+// The temperature the night light is heading for now, before any warm-up or
+// clear-down: a hold's own (Movie mode), otherwise the saved one, moving to
+// the bedtime one from bedtime. Not rounded during bedtime's fade, so a warm-up
+// or clear-down mixed with it is rounded once, not twice (twice let steps
+// reach 6 mireds).
+function exactTargetKelvin(settings, location, nowMs) {
+  var movie = movieKelvin(settings, nowMs)
+  if (movie !== null) return movie
+  var bed = bedtimeAt(settings, location, nowMs)
+  if (!bed || nowMs < bed.start) return settings.temperature
+  if (bed.lengthMs <= 0 || nowMs >= bed.start + bed.lengthMs) return settings.bedtimeTemperature
+  return exactMix(settings.temperature, settings.bedtimeTemperature, (nowMs - bed.start) / bed.lengthMs)
+}
+
+function targetKelvin(settings, location, nowMs) {
+  return sendableKelvin(exactTargetKelvin(settings, location, nowMs))
+}
+
+// Where the night settles once any fade in progress ends: what a fade lands
+// on, which is always sent (isVisibleStep).
+function restingKelvin(settings, location, nowMs) {
+  var movie = movieKelvin(settings, nowMs)
+  if (movie !== null) return movie
+  return bedtimeReached(settings, location, nowMs) ? settings.bedtimeTemperature : settings.temperature
 }
 
 // The temperature the screen should be at now, including any ramp in progress.
@@ -472,9 +549,11 @@ function targetKelvin(settings, nowMs) {
 // A paused app in front keeps the screen neutral whatever the schedule says.
 function kelvinAt(settings, location, nowMs, paused) {
   if (paused === true || !desiredState(settings, location, nowMs).on) return OFF_TEMP
-  var target = targetKelvin(settings, nowMs)
+  var target = exactTargetKelvin(settings, location, nowMs)
   var ramp = rampAt(settings, location, nowMs)
-  return ramp ? mixKelvin(OFF_TEMP, target, ramp.progress) : target
+  if (!ramp || ramp.progress >= 1) return sendableKelvin(target)
+  if (ramp.progress <= 0) return OFF_TEMP
+  return roundKelvin(exactMix(OFF_TEMP, target, ramp.progress))
 }
 
 // The fade the schedule is in now: how far it is from the daytime value (0) to
@@ -538,13 +617,25 @@ function isBigJump(from, to) {
   return Math.abs(mireds(from) - mireds(to)) > 4 * STEP_MIREDS
 }
 
-// How long the fade in progress takes to move STEP_MIREDS, never under
-// MIN_STEP_MS. Null outside a fade.
+// How long the fades in progress take to move STEP_MIREDS between them (a
+// warm-up or clear-down, and bedtime's, which can overlap), never under
+// MIN_STEP_MS and never past the shorter fade's length. Null outside a fade.
 function fadeStepMs(settings, location, nowMs) {
   var ramp = rampAt(settings, location, nowMs)
-  if (!ramp) return null
-  var span = Math.abs(mireds(OFF_TEMP) - mireds(settings.temperature))
-  var step = span > STEP_MIREDS ? ramp.lengthMs * STEP_MIREDS / span : ramp.lengthMs
+  var bed = bedtimeAt(settings, location, nowMs)
+  var bedFading = bed !== null && bed.lengthMs > 0 && nowMs >= bed.start && nowMs < bed.start + bed.lengthMs
+  if (!ramp && !bedFading) return null
+  var rate = 0 // Mireds per millisecond, at most
+  var longest = Infinity
+  if (ramp) {
+    rate += Math.abs(mireds(OFF_TEMP) - mireds(exactTargetKelvin(settings, location, nowMs))) / ramp.lengthMs
+    longest = ramp.lengthMs
+  }
+  if (bedFading) {
+    rate += Math.abs(mireds(settings.temperature) - mireds(settings.bedtimeTemperature)) / bed.lengthMs
+    longest = Math.min(longest, bed.lengthMs)
+  }
+  var step = rate > 0 ? Math.min(STEP_MIREDS / rate, longest) : longest
   return Math.max(MIN_STEP_MS, step)
 }
 
@@ -556,9 +647,9 @@ function nextClock(nowMs, minute) {
 
 // The next moment the screen should change by itself, so the service can sleep
 // until then instead of checking all the time: a scheduled switch, the start of
-// the clear-down, the next visible fade step or the end of the fade, a hold
-// ending, or just after one of hyprsunset.conf's own switch times. Null when
-// nothing is due.
+// the clear-down, bedtime, the next visible fade step or the end of the fade, a
+// hold ending, or just after one of hyprsunset.conf's own switch times. Null
+// when nothing is due.
 function nextDueAt(settings, location, nowMs, profileMinutes) {
   var due = []
   if (!followsSwitch(settings, location)) {
@@ -568,10 +659,14 @@ function nextDueAt(settings, location, nowMs, profileMinutes) {
   }
   if (settings.override) due.push(settings.override.until)
   if (settings.rampSkipUntil) due.push(settings.rampSkipUntil)
+  var stepMs = fadeStepMs(settings, location, nowMs)
+  if (stepMs !== null) due.push(nowMs + stepMs)
   var ramp = rampAt(settings, location, nowMs)
-  if (ramp) {
-    due.push(nowMs + fadeStepMs(settings, location, nowMs))
-    due.push(nowMs + ramp.remainingMs)
+  if (ramp) due.push(nowMs + ramp.remainingMs)
+  var bed = bedtimeAt(settings, location, nowMs)
+  if (bed) {
+    due.push(bed.start)
+    due.push(bed.start + bed.lengthMs)
   }
   var minutes = Array.isArray(profileMinutes) ? profileMinutes : []
   var lastRecheck = PROFILE_RECHECK_MS[PROFILE_RECHECK_MS.length - 1]
@@ -672,13 +767,13 @@ function holdPatch(settings, location, nowMs, kind, minutes) {
   return { override: { on: kind === "on", until: nowMs + length * MINUTE_MS } }
 }
 
-// Saving a temperature. During Movie mode it also drops the hold's own
-// temperature, so the one just chosen shows for the rest of the hold.
-function temperaturePatch(settings, kelvin, nowMs) {
-  var patch = { temperature: clampTemp(kelvin) }
-  var override = settings.override
-  if (override && nowMs < override.until && override.on && Number.isFinite(override.temperature))
-    patch.override = { on: true, until: override.until }
+// Saving the temperature the screen is showing: the bedtime one once bedtime
+// has come, otherwise the evening one. During Movie mode it also drops the
+// hold's own temperature, so the one just chosen shows for the rest of the hold.
+function temperaturePatch(settings, location, kelvin, nowMs) {
+  var patch = {}
+  patch[bedtimeReached(settings, location, nowMs) ? "bedtimeTemperature" : "temperature"] = clampTemp(kelvin)
+  if (movieKelvin(settings, nowMs) !== null) patch.override = { on: true, until: settings.override.until }
   return patch
 }
 
@@ -762,6 +857,10 @@ if (typeof module !== "undefined") {
     modePatch: modePatch,
     holdPatch: holdPatch,
     targetKelvin: targetKelvin,
+    restingKelvin: restingKelvin,
+    bedtimeAt: bedtimeAt,
+    bedtimeReached: bedtimeReached,
+    MAX_WEEKEND_DELAY: MAX_WEEKEND_DELAY,
     presetKelvin: presetKelvin,
     temperaturePatch: temperaturePatch,
     presetName: presetName,

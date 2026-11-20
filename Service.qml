@@ -71,6 +71,9 @@ Item {
   readonly property bool locationChecked: weatherChecked && zoneNameChecked && zoneTableChecked
 
   property var plan: ({ on: false, until: 0 })
+  // Bedtime has come tonight, so the slider and presets set the bedtime level.
+  // Worked out on each check, since it depends on the clock.
+  property bool bedtimeNow: false
   property real sunrise: 0
   property real sunset: 0
 
@@ -152,8 +155,14 @@ Item {
   readonly property bool movie: holding && settings.override.temperature !== undefined
   readonly property int movieTemp: Model.MOVIE_TEMP
   readonly property var presets: Model.PRESETS
-  // The preset the saved temperature matches, or "".
-  readonly property string preset: Model.presetName(settings.temperature)
+  // The temperature the slider shows and sets: the bedtime one once bedtime has come.
+  readonly property int activeTemperature: bedtimeNow ? settings.bedtimeTemperature : settings.temperature
+  // The preset that temperature matches, or "".
+  readonly property string preset: Model.presetName(activeTemperature)
+  readonly property bool bedtime: settings.bedtime
+  readonly property string bedtimeAt: settings.bedtimeAt
+  readonly property int bedtimeTemperature: settings.bedtimeTemperature
+  readonly property int weekendDelay: settings.weekendDelay
   // "Off until morning" needs a schedule to know when morning is.
   readonly property bool canHoldUntilMorning: mode !== "manual" && !(mode === "sun" && location === null)
 
@@ -231,7 +240,7 @@ Item {
     var clamped = Model.clampTemp(kelvin)
     fadeTimer.stop()
     // In mid-ramp a preview has to end too, or the next step would snap it back early.
-    if (plan.on && currentLevel() === temperature) {
+    if (plan.on && currentLevel() === Model.restingKelvin(settings, location, Date.now())) {
       previewing = false
     } else {
       previewing = true
@@ -240,11 +249,12 @@ Item {
     apply(clamped)
   }
 
-  // In Movie mode this also ends the milder temperature, keeping the hold's end.
+  // The temperature showing now: the bedtime one once bedtime has come. In Movie
+  // mode this also ends the milder temperature, keeping the hold's end.
   function setTemperature(kelvin) {
     var clamped = Model.clampTemp(kelvin)
     externalHold = false
-    updateSettings(Model.temperaturePatch(settings, clamped, Date.now()))
+    updateSettings(Model.temperaturePatch(settings, location, clamped, Date.now()))
     preview(clamped)
   }
 
@@ -301,8 +311,30 @@ Item {
     updateSettings(patch)
   }
 
+  // onTime, offTime or bedtimeAt.
   function stepTime(key, deltaMinutes) {
-    setTime(key, Model.stepTime(key === "onTime" ? onTime : offTime, deltaMinutes))
+    setTime(key, Model.stepTime(settings[key], deltaMinutes))
+  }
+
+  function setBedtime(enabled) {
+    updateSettings({ bedtime: enabled === true })
+  }
+
+  function setBedtimeTemperature(kelvin) {
+    updateSettings({ bedtimeTemperature: Model.clampTemp(kelvin) })
+  }
+
+  function stepBedtimeTemperature(deltaKelvin) {
+    setBedtimeTemperature(bedtimeTemperature + deltaKelvin)
+  }
+
+  // How much later bedtime is when the night starts on a Friday or Saturday.
+  function setWeekendDelay(minutes) {
+    updateSettings({ weekendDelay: Number(minutes) })
+  }
+
+  function stepWeekendDelay(deltaMinutes) {
+    setWeekendDelay(weekendDelay + deltaMinutes)
   }
 
   // Minutes before sunset that Sun mode turns on; negative is after it.
@@ -402,6 +434,7 @@ Item {
       sunset = 0
     }
     plan = Model.desiredState(settings, location, now)
+    bedtimeNow = Model.bedtimeReached(settings, location, now)
     // Look first; step() decides what to send once hyprsunset has answered. A
     // look already under way, or the one that follows a send, does the same.
     if (!probeProcess.running && !applyProcess.running) probeProcess.running = true
@@ -425,7 +458,7 @@ Item {
       if (first) apply(level)
       else fadeTo(level)
     } else if (!externalHold && !previewing && !fadeTimer.running
-               && Model.isVisibleStep(lastLevel, level, Model.targetKelvin(settings, Date.now()))) {
+               && Model.isVisibleStep(lastLevel, level, Model.restingKelvin(settings, location, Date.now()))) {
       // A fade's next step goes straight on; a bigger jump, like waking up in the
       // middle of a fade or changing a setting during one, fades over 2 seconds.
       var jump = Model.isBigJump(lastLevel, level)
@@ -839,6 +872,12 @@ Item {
         externalHold: root.externalHold,
         override: root.settings.override,
         movie: root.movie,
+        target: Model.targetKelvin(root.settings, root.location, Date.now()),
+        bedtime: root.bedtime,
+        bedtimeAt: root.bedtimeAt,
+        bedtimeTemperature: root.bedtimeTemperature,
+        weekendDelay: root.weekendDelay,
+        bedtimeNow: root.bedtimeNow,
         sunsetOffset: root.sunsetOffset,
         fadeIn: root.fadeIn,
         fadeOut: root.fadeOut,
@@ -856,6 +895,19 @@ Item {
     function set(kelvin: int): void { root.setTemperature(kelvin) }
     // Save a preset's temperature: mild, night, warm or candle.
     function preset(name: string): string { return root.setPreset(name) ? "ok" : "invalid" }
+    // A warmer level later in the night: on, off, or its time (22:30).
+    function bedtime(value: string): string {
+      if (value === "on" || value === "off") {
+        root.setBedtime(value === "on")
+        return "ok"
+      }
+      if (Model.parseTime(value) === null) return "invalid"
+      root.setTime("bedtimeAt", value)
+      return "ok"
+    }
+    function bedtimetemp(kelvin: int): void { root.setBedtimeTemperature(kelvin) }
+    // Minutes later on Friday and Saturday nights, 0 to 180.
+    function weekend(minutes: int): void { root.setWeekendDelay(minutes) }
     // Milder (5000K) for two and a half hours, then back to the schedule.
     function movie(): string { return root.hold("movie", 0) ? "ok" : "invalid" }
     function preview(kelvin: int): void { root.preview(kelvin) }
