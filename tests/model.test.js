@@ -326,6 +326,81 @@ test("the mildest temperature stays clear of hyprsunset's just-started value", (
   }
 })
 
+// ---- Settings and state, in two files ------------------------------------------
+
+test("every setting has exactly one home", () => {
+  const all = Object.keys(Model.defaultSettings()).sort()
+  const homes = Model.SETTING_KEYS.concat(Model.STATE_KEYS).sort()
+  assert.deepStrictEqual(homes, all, "add a new key to SETTING_KEYS or STATE_KEYS")
+  for (const key of Model.SETTING_KEYS) assert.ok(!Model.STATE_KEYS.includes(key), key + " has two homes")
+})
+
+const populated = () => settings({
+  mode: "custom", temperature: 2700, onTime: "20:30", offTime: "06:45", ramp: true, fadeIn: 45, fadeOut: 20,
+  sunsetOffset: 30, pauseFullscreen: true, pauseApps: ["gimp", "steam_app_*"], autoLocation: true,
+  manualOn: true, override: { on: false, until: at(2026, 11, 6, 7) }, rampSkipUntil: at(2026, 11, 5, 22),
+  latitude: 47.6, longitude: -122.3, detected: { latitude: 47.61, longitude: -122.33, name: "Somewhere" }
+})
+
+test("settings and state split and combine without loss", () => {
+  const s = populated()
+  const parts = Model.splitSettings(s)
+  const back = Model.combineSettings(parts.settings, parts.state)
+  assert.deepStrictEqual(back.settings, s)
+  assert.strictEqual(back.migrate, false)
+  // Through JSON, as on disk.
+  const disk = Model.combineSettings(JSON.parse(JSON.stringify(parts.settings)), JSON.parse(JSON.stringify(parts.state)))
+  assert.deepStrictEqual(disk.settings, s)
+})
+
+test("coordinates and holds stay in the private state file", () => {
+  const parts = Model.splitSettings(populated())
+  for (const key of ["latitude", "longitude", "detected", "override", "manualOn", "rampSkipUntil"]) {
+    assert.ok(key in parts.state, key + " in state")
+    assert.ok(!(key in parts.settings), key + " kept out of the tracked file")
+  }
+  assert.ok(!JSON.stringify(parts.settings).includes("47.6"), "no coordinates in the tracked file")
+})
+
+test("a hold or the manual switch changes only the state file", () => {
+  const before = populated()
+  const held = settings(Object.assign({}, before, { override: { on: true, until: at(2026, 11, 7, 7) }, manualOn: false }))
+  assert.deepStrictEqual(Model.splitSettings(held).settings, Model.splitSettings(before).settings)
+  assert.notDeepStrictEqual(Model.splitSettings(held).state, Model.splitSettings(before).state)
+})
+
+test("the old single file is split once, its state kept", () => {
+  const old = JSON.parse(JSON.stringify(populated()))
+  const fresh = Model.combineSettings(old, null)
+  assert.strictEqual(fresh.migrate, true)
+  assert.deepStrictEqual(fresh.settings, populated())
+  // If the state file already has a key, it wins over the old file's copy.
+  const newer = { override: { on: true, until: at(2026, 11, 9, 7) } }
+  const both = Model.combineSettings(old, newer)
+  assert.strictEqual(both.migrate, true)
+  assert.deepStrictEqual(both.settings.override, newer.override)
+  assert.strictEqual(both.settings.latitude, 47.6, "the rest comes from the old file")
+})
+
+test("each key is read only from its own file", () => {
+  const d = Model.defaultSettings()
+  const mixed = Model.combineSettings({ temperature: 2500 }, { temperature: 1000, mode: "manual", latitude: 10, longitude: 20 })
+  assert.strictEqual(mixed.settings.temperature, 2500, "temperature only from the settings file")
+  assert.strictEqual(mixed.settings.mode, d.mode, "mode only from the settings file")
+  assert.strictEqual(mixed.settings.latitude, 10)
+  assert.strictEqual(mixed.migrate, false)
+})
+
+test("garbage in either file falls back to defaults for that file", () => {
+  const d = Model.defaultSettings()
+  assert.deepStrictEqual(Model.combineSettings("nonsense", 5).settings, d)
+  assert.deepStrictEqual(Model.combineSettings(null, null).settings, d)
+  assert.deepStrictEqual(Model.combineSettings([1, 2], { override: "x" }).settings, d)
+  const half = Model.combineSettings({ temperature: 2000 }, "nonsense")
+  assert.strictEqual(half.settings.temperature, 2000)
+  assert.strictEqual(half.settings.override, null)
+})
+
 // ---- Start before sunset ----------------------------------------------------
 
 const sunsetOn = (day) => Model.sunTimes(at(2026, 11, day, 12), place.latitude, place.longitude)

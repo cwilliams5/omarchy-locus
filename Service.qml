@@ -30,7 +30,11 @@ Item {
   readonly property int previewMilliseconds: 10000
   readonly property string home: Quickshell.env("HOME")
   readonly property string settingsDirectory: home + "/.local/state/omarchy/settings"
+  // Cody's choices, tracked by his dotfiles. Holds, the manual switch and typed
+  // coordinates go in the state file instead: they change by themselves or are
+  // private, so they never reach the dotfiles, and a hold never rewrites this.
   readonly property string settingsPath: settingsDirectory + "/locus.json"
+  readonly property string statePath: settingsDirectory + "/locus-state.json"
   // Sundown, which Locus was forked from, kept its settings here. Read once, the
   // first time Locus runs, so switching over keeps them.
   readonly property string sundownSettingsPath: settingsDirectory + "/heliotrope.json"
@@ -42,6 +46,16 @@ Item {
 
   property var settings: Model.normalizeSettings(null)
   property bool settingsLoaded: false
+  // Each file as last read or written (parsed), whether it was read empty, and
+  // its half as last saved, so a file is written only when its own half changed.
+  property var settingsRaw: null
+  property var stateRaw: null
+  property bool settingsHalfLoaded: false
+  property bool stateHalfLoaded: false
+  property bool settingsHalfEmpty: false
+  property bool stateHalfEmpty: false
+  property string writtenSettingsJson: ""
+  property string writtenStateJson: ""
   property bool directoryReady: false
   property bool settingsSecured: false
 
@@ -147,8 +161,26 @@ Item {
     for (var key in settings) next[key] = settings[key]
     for (var changed in patch) next[changed] = patch[changed]
     settings = Model.normalizeSettings(next)
-    settingsFile.setText(JSON.stringify(settings, null, 2) + "\n")
+    saveHalves(false, false)
     tick()
+  }
+
+  // Writes each file only when its half changed, or when forced: a file just
+  // created empty, or the one-time split of the old single file.
+  function saveHalves(forceSettings, forceState) {
+    var parts = Model.splitSettings(settings)
+    var settingsJson = JSON.stringify(parts.settings)
+    var stateJson = JSON.stringify(parts.state)
+    if (forceSettings || settingsJson !== writtenSettingsJson) {
+      writtenSettingsJson = settingsJson
+      settingsRaw = parts.settings
+      settingsFile.setText(JSON.stringify(parts.settings, null, 2) + "\n")
+    }
+    if (forceState || stateJson !== writtenStateJson) {
+      writtenStateJson = stateJson
+      stateRaw = parts.state
+      stateFile.setText(JSON.stringify(parts.state, null, 2) + "\n")
+    }
   }
 
   function setMode(value) {
@@ -497,43 +529,81 @@ Item {
     step()
   }
 
-  function loadSettings(text) {
-    // Newly created by settingsSetup: fill it in, keeping anything already in memory.
-    if (String(text).trim() === "") {
-      settingsLoaded = true
-      updateSettings({})
-      return
-    }
+  // One of the two files was read. Nothing is decided until both have been.
+  function loadHalf(which, text) {
+    var empty = String(text).trim() === ""
     var parsed = null
-    try {
-      parsed = JSON.parse(text)
-    } catch (error) {
-      console.warn("locus: ignoring unreadable settings file")
+    if (!empty) {
+      try {
+        parsed = JSON.parse(text)
+      } catch (error) {
+        console.warn("locus: ignoring unreadable " + which + " file")
+      }
     }
-    var next = Model.normalizeSettings(parsed)
-    var changed = JSON.stringify(next) !== JSON.stringify(settings)
-    settings = next
+    if (which === "settings") {
+      settingsRaw = parsed
+      settingsHalfEmpty = empty
+      settingsHalfLoaded = true
+    } else {
+      stateRaw = parsed
+      stateHalfEmpty = empty
+      stateHalfLoaded = true
+    }
+    if (settingsHalfLoaded && stateHalfLoaded) combineLoaded()
+  }
+
+  // A file that can't be created: run on the defaults for it, saving nothing.
+  function markHalfMissing(which) {
+    if (which === "settings") {
+      settingsRaw = null
+      settingsHalfEmpty = false
+      settingsHalfLoaded = true
+    } else {
+      stateRaw = null
+      stateHalfEmpty = false
+      stateHalfLoaded = true
+    }
+    if (settingsHalfLoaded && stateHalfLoaded) combineLoaded()
+  }
+
+  function combineLoaded() {
+    // A file read empty was just created by settingsSetup. Once running, fill
+    // it from memory (it was deleted), so nothing already chosen is lost.
+    var memory = Model.splitSettings(settings)
+    var fromSettings = settingsHalfEmpty && settingsLoaded ? memory.settings : settingsRaw
+    var fromState = stateHalfEmpty && settingsLoaded ? memory.state : stateRaw
+    var result = Model.combineSettings(fromSettings, fromState)
+    var changed = JSON.stringify(result.settings) !== JSON.stringify(settings)
+    settings = result.settings
+    var parts = Model.splitSettings(settings)
+    writtenSettingsJson = JSON.stringify(parts.settings)
+    writtenStateJson = JSON.stringify(parts.state)
     settingsLoaded = true
+    var writeSettings = settingsHalfEmpty || result.migrate
+    var writeState = stateHalfEmpty || result.migrate
+    settingsHalfEmpty = false
+    stateHalfEmpty = false
+    if (writeSettings || writeState) saveHalves(writeSettings, writeState)
     if (changed || lastPlanOn === null) tick()
   }
 
   onLocationChanged: tick()
   onLocationCheckedChanged: tick()
 
-  // The settings can hold private coordinates, so the file is owner-only before
-  // anything is saved to it. Saves replace the file but keep its permissions, and
-  // this also tightens a file made by an earlier version. With no settings yet,
-  // Sundown's are copied over once, permissions and all.
+  // Both files are owner-only before anything is saved to them (the state file
+  // holds coordinates). Saves replace a file but keep its permissions, and this
+  // also tightens a file made by an earlier version. With no settings yet,
+  // Sundown's are copied over once, permissions and all, and split on load.
   Process {
     id: settingsSetup
     running: true
     command: ["sh", "-c",
-      "mkdir -p \"$1\" && { [ -e \"$2\" ] || [ ! -f \"$3\" ] || cp -p \"$3\" \"$2\"; } && touch \"$2\" && chmod 600 \"$2\"",
-      "locus", root.settingsDirectory, root.settingsPath, root.sundownSettingsPath]
+      "mkdir -p \"$1\" && { [ -e \"$2\" ] || [ ! -f \"$3\" ] || cp -p \"$3\" \"$2\"; } && touch \"$2\" \"$4\" && chmod 600 \"$2\" \"$4\"",
+      "locus", root.settingsDirectory, root.settingsPath, root.sundownSettingsPath, root.statePath]
     onExited: function(exitCode) {
       root.settingsSecured = exitCode === 0
       if (!root.settingsSecured)
-        console.warn("locus: could not make the settings file private")
+        console.warn("locus: could not make the settings files private")
       root.directoryReady = true
     }
   }
@@ -544,23 +614,34 @@ Item {
     watchChanges: true
     printErrors: false
     onFileChanged: reload()
-    onLoaded: root.loadSettings(text())
-    onLoadFailed: function(error) {
-      if (error !== FileViewError.FileNotFound) {
-        console.warn("locus: could not read settings: " + FileViewError.toString(error))
-        return
-      }
-      // Deleted while running. A plain save would recreate it readable by others.
-      if (root.settingsSecured) {
-        root.settingsSecured = false
-        root.directoryReady = false
-        settingsSetup.running = true
-        return
-      }
-      // Setup couldn't create it, so run on the defaults without saving a new file.
-      root.settingsLoaded = true
-      root.tick()
+    onLoaded: root.loadHalf("settings", text())
+    onLoadFailed: function(error) { root.halfLoadFailed("settings", error) }
+  }
+
+  FileView {
+    id: stateFile
+    path: root.directoryReady ? root.statePath : ""
+    watchChanges: true
+    printErrors: false
+    onFileChanged: reload()
+    onLoaded: root.loadHalf("state", text())
+    onLoadFailed: function(error) { root.halfLoadFailed("state", error) }
+  }
+
+  function halfLoadFailed(which, error) {
+    if (error !== FileViewError.FileNotFound) {
+      console.warn("locus: could not read the " + which + " file: " + FileViewError.toString(error))
+      return
     }
+    // Deleted while running. A plain save would recreate it readable by others.
+    if (settingsSecured) {
+      settingsSecured = false
+      directoryReady = false
+      settingsSetup.running = true
+      return
+    }
+    // Setup couldn't create it, so run on the defaults without saving a new file.
+    markHalfMissing(which)
   }
 
   // Omarchy's own location, which owns this file's format (omarchy-weather-location).

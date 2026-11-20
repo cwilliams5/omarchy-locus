@@ -52,7 +52,9 @@ hyprsunset will switch by itself.
   a plain clone that updates with `omarchy plugin update`. Cody's dotfiles
   (`~/Work/dotfiles`, chezmoi) list it by URL in `plugins.yaml` and describe
   it in `docs/customizations.md`. Settings live in
-  `~/.local/state/omarchy/settings/locus.json` (not tracked).
+  `~/.local/state/omarchy/settings/locus.json`, which the dotfiles track;
+  holds, the manual switch and coordinates in `locus-state.json`, never
+  tracked.
 
 ## Layout
 
@@ -103,11 +105,17 @@ icon.svg           the app tile
    (`shaderStep`). Running it on every check cost about 29,000 short-lived
    processes a day for nothing. Removing the shader takes one run; the first
    check after a shell start runs it once to clear a leftover.
-7. **Settings are written only by the service** (`updateSettings`, an atomic
-   FileView write), and the file stays mode 600 because it can hold
-   coordinates. An empty read is treated as a brand-new file and filled from
-   memory, so anything that writes the file non-atomically (`cat >`) gets
-   overwritten. Change settings through the panel or the IPC commands.
+7. **Two files, each written only when its half changed.** Settings (Cody's
+   choices) in `locus.json`, tracked by his dotfiles; state (holds, the
+   manual switch, typed and detected coordinates) in `locus-state.json`,
+   never tracked, so location never reaches git and a hold never rewrites the
+   tracked file. Every key has one home (`Model.SETTING_KEYS` /
+   `STATE_KEYS`; a test fails if a new setting has none). Both files are mode
+   600. Only the service writes them (`updateSettings` -> `saveHalves`). An
+   empty read is treated as a brand-new file and filled from memory, so a
+   non-atomic outside write (`cat >`) gets overwritten; an atomic one (a temp
+   file renamed over it, as chezmoi does) is read normally. Change settings
+   through the panel or the IPC commands.
 8. **Text from outside is untrusted.** App classes and titles go through
    `Model.displayName` before any label, and through `Model.cleanAppName`
    before they're stored (no markup characters survive). Omarchy's plugin
@@ -142,9 +150,11 @@ icon.svg           the app tile
 - Location, in order: coordinates typed in the panel, IP detection (off by
   default, `geo.omarchy.org`), Omarchy's weather location if it has
   coordinates, the time zone's main city from `zone1970.tab`.
-- The settings file is `locus.json`. The first time Locus runs with none, it
-  copies Sundown's `heliotrope.json` once (owner-only), so people switching
-  over keep their settings.
+- Settings load from two files (`Model.combineSettings`) and save back split
+  (`Model.splitSettings`). The first time Locus runs with no settings, it
+  copies Sundown's `heliotrope.json` once (owner-only); a settings file that
+  still holds state (that import, or the single file from before the split)
+  is split into the two files once.
 
 ## Platform facts this depends on (re-check after updates)
 

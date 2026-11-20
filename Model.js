@@ -62,6 +62,45 @@ function defaultSettings() {
   }
 }
 
+// Where each setting lives. Settings are Cody's choices, in locus.json, which
+// his dotfiles track. State changes by itself (holds, the manual switch) or is
+// private (typed coordinates, the detected place), in locus-state.json, which
+// is never tracked. Every key of defaultSettings has exactly one home; a test
+// enforces it, so a new setting can't be added without picking one.
+var SETTING_KEYS = ["mode", "temperature", "onTime", "offTime", "ramp", "fadeIn", "fadeOut",
+                    "sunsetOffset", "pauseFullscreen", "pauseApps", "autoLocation"]
+var STATE_KEYS = ["manualOn", "override", "rampSkipUntil", "latitude", "longitude", "detected"]
+
+function pickKeys(object, keys) {
+  var out = {}
+  if (!object || typeof object !== "object" || Array.isArray(object)) return out
+  for (var i = 0; i < keys.length; i++)
+    if (Object.prototype.hasOwnProperty.call(object, keys[i])) out[keys[i]] = object[keys[i]]
+  return out
+}
+
+// The combined settings, as the two files to save.
+function splitSettings(settings) {
+  return { settings: pickKeys(settings, SETTING_KEYS), state: pickKeys(settings, STATE_KEYS) }
+}
+
+// The combined settings from the two files' parsed contents. Each key is read
+// from its own file only. A settings file that still holds state (the single
+// file from before the split, or Sundown's imported one) lends it to the state
+// where the state file has none, and asks to be split once (migrate).
+function combineSettings(settingsRaw, stateRaw) {
+  var chosen = pickKeys(settingsRaw, SETTING_KEYS)
+  var state = pickKeys(stateRaw, STATE_KEYS)
+  var stray = pickKeys(settingsRaw, STATE_KEYS)
+  var migrate = Object.keys(stray).length > 0
+  for (var key in stray)
+    if (!Object.prototype.hasOwnProperty.call(state, key)) state[key] = stray[key]
+  var merged = {}
+  for (var s in state) merged[s] = state[s]
+  for (var c in chosen) merged[c] = chosen[c]
+  return { settings: normalizeSettings(merged), migrate: migrate }
+}
+
 function clampInt(value, low, high) {
   return Math.max(low, Math.min(high, Math.round(Number(value))))
 }
@@ -603,6 +642,10 @@ if (typeof module !== "undefined") {
     CHECK_MS: CHECK_MS,
     PAUSE_APPS_MAX: PAUSE_APPS_MAX,
     APP_NAME_MAX: APP_NAME_MAX,
+    SETTING_KEYS: SETTING_KEYS,
+    STATE_KEYS: STATE_KEYS,
+    splitSettings: splitSettings,
+    combineSettings: combineSettings,
     cleanAppName: cleanAppName,
     appList: appList,
     pausedFor: pausedFor,

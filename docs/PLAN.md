@@ -47,7 +47,7 @@ in the same commit as the work.
 
 Phase A, foundation:
 
-- [ ] A1. Settings in Omarchy's settings panel (`shell.json`), state in `locus.json`. **On hold: no plugin settings GUI exists; Cody to choose (a), (b) or (c), see A1.**
+- [ ] A1. Split settings from state: `locus.json` (settings, tracked by Cody's dotfiles) and `locus-state.json` (holds, coordinates; untracked). **Cody chose option (b) on 2026-11-19.**
 - [x] A2. Finer rounding for very warm fades (5be21b1, tested live)
 
 Phase B, features that cost nothing to run:
@@ -120,7 +120,29 @@ Cody also gets them in Omarchy's own settings panel, and in his dotfiles
     independent of Omarchy's internals; a later move to (a) would migrate again.
   - **(c) Skip for now,** revisit if Omarchy ships a settings UI.
 
-**Design (option a):**
+**Decision (2026-11-19): option (b).** Cody's reasoning, agreed: the
+benefit available today (settings in the dotfiles) is the same either way,
+and Locus's own IPC already covers `omarchy bar set`. Move to (a) only once
+Omarchy ships a settings UI, when its behavior can be seen rather than guessed.
+
+**Design (option b, being built):**
+- `locus.json` (settings, mode 600, Cody's dotfiles track it):
+  `mode, temperature, onTime, offTime, ramp, fadeIn, fadeOut, sunsetOffset,
+  pauseFullscreen, pauseApps, autoLocation`, and phase B's new settings.
+- `locus-state.json` (state, mode 600, never tracked): `manualOn, override,
+  rampSkipUntil, latitude, longitude, detected`. Coordinates live here so they
+  never reach git.
+- The rest of the code keeps one combined `settings` object. `Model.js`
+  splits it for saving and combines the two files for loading; each key is
+  read only from its home file.
+- Each half is written only when it changed, so a hold never rewrites the
+  tracked file (no dotfiles churn).
+- Migration, once: a `locus.json` holding state keys (the old combined file,
+  or Sundown's imported one) is split into the two files.
+- After it lands: `chezmoi add ~/.local/state/omarchy/settings/locus.json`
+  in the dotfiles, and document it.
+
+**Design (option a, not chosen, kept for later):**
 - **Settings** (user choices, in `shell.json`, tracked by Cody's dotfiles):
   `mode, temperature, onTime, offTime, ramp, fadeIn, fadeOut, sunsetOffset,
   pauseFullscreen, pauseApps` (a comma-separated string in the schema),

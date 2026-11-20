@@ -65,7 +65,7 @@ The time zone is only a rough guide, so sunset can be off by a while if you live
 
 Location detection is off by default. It asks `geo.omarchy.org` for the city of your IP address, as Omarchy's weather widget does, when the shell starts, every few hours, and after a long sleep. The last answer is kept so it works offline, and is deleted when you turn this off. A VPN will make it report the VPN's location.
 
-Coordinates you enter, and the detected location, are saved with the other settings in `~/.local/state/omarchy/settings/locus.json`. Locus keeps that file readable only by your account. If you used Sundown, Locus copies its settings (`heliotrope.json`) once, the first time it runs.
+Your settings are saved in `~/.local/state/omarchy/settings/locus.json`. Coordinates you enter, the detected location, and holds go in `locus-state.json` beside it, so you can back up or sync your settings without your location. Locus keeps both files readable only by your account. If you used Sundown, Locus copies its settings (`heliotrope.json`) once, the first time it runs, and sorts them into the two files.
 
 ## Commands
 
@@ -108,7 +108,7 @@ The path is relative to Omarchy's indicators folder, because Omarchy has no supp
 ```bash
 omarchy plugin remove io.github.cwilliams5.locus
 hyprctl hyprsunset identity
-rm ~/.local/state/omarchy/settings/locus.json
+rm ~/.local/state/omarchy/settings/locus.json ~/.local/state/omarchy/settings/locus-state.json
 ```
 
 The second line clears any tint left on the screen, and the third deletes your settings.
