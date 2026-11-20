@@ -77,6 +77,7 @@ i18n/en.json       the panel's strings (Omarchy picks the language)
 tests/model.test.js  node tests for Model.js
 docs/PLAN.md       the development plan and its status list
 branding/          the name, logo and palette (BRANDING.md, build.py)
+media/             README images; tint.sh applies hyprsunset's matrix to a screenshot
 icon.svg           the app tile
 ```
 
@@ -96,8 +97,10 @@ icon.svg           the app tile
 3. **Fade steps are spaced `STEP_MIREDS` (3) apart and sent only from
    `MIN_SEND_MIREDS` (1.5).** The half step is not a typo: temperatures are
    rounded to 10K (about 1 mired at 3000K), so a due step can measure 2.9.
-   With a threshold of 3, real steps doubled to 6 mireds, which the eye sees.
-   The tests simulate whole fades and days and fail on that.
+   With a threshold of 3, real steps doubled to 6 mireds. The tests simulate
+   whole fades and days and fail on that. (On screen, hyprsunset 0.4.0 only
+   changes colour at whole hundreds of Kelvin, see the platform facts; Locus
+   stays fine-grained so it's right the day hyprsunset is.)
 4. **Real fullscreen only: Hyprland's fullscreen bit 2.** A maximized window
    reports fullscreen 1 (Cody's Super+Shift+F uses maximized mode), and a
    workspace reports both as `hasFullscreen`. Omarchy's own bar uses the same
@@ -203,6 +206,16 @@ Quickshell 0.3.2.
 - hyprsunset waits for its next profile in one-minute naps on a clock that
   stops during sleep, so a switch time passed while asleep lands up to a
   minute late. Locus looks at +2 s and +62 s and keeps a two-minute grace.
+- **hyprsunset applies colour in whole steps of 100K.** `matrixForKelvin`
+  takes an integer and divides it by 100, truncating; upstream issue #94 was
+  closed with `temp /= 100.F`, which still truncates because `temp` stays an
+  integer (checked 2026-11-20 by compiling it: 3000 to 3099 give the same
+  matrix). So a 6500K-to-3000K fade changes the screen 35 times, steps of
+  about 2 mireds near 6500K and 11 near 3000K. The README's Known limits say
+  so. Re-check after hyprsunset updates.
+- **Screenshots don't show hyprsunset's tint** (it's a CTM applied after
+  capture); they do show the below-1000K screen shader. README images apply
+  hyprsunset's own matrix with `media/tint.sh` and say so.
 - `hyprctl hyprsunset gamma [percent]`: gamma multiplies whatever matrix is
   set, identity included, so dimming works with the tint off. hyprsunset
   starts at 100%, and every profile switch sets the profile's gamma (100%

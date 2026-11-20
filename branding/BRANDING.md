@@ -8,7 +8,7 @@ options are in `alternatives/`.
 - **The Planckian locus** is the curve of colours a glowing object passes
   through as it heats or cools: bluish daylight white, warm white, candle
   orange. Every temperature Locus puts on the screen sits on that curve, and
-  its fades walk along it, a few mireds at a time.
+  its fades walk along it, a small step at a time.
 - **A locus is the path a moving point traces.** That's the logo: a point on
   its path. The same arc reads as the sun's path across the sky, which the
   schedule follows.
