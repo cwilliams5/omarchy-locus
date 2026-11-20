@@ -24,7 +24,7 @@ in the same commit as the work.
 
 - **2026-11-19, end of session 1:** A1, A2, B1 done, merged, pushed, tested
   live; the installed copy is on `main`; dotfiles updated.
-- **2026-11-19, session 2:** B2 to B7 and B9 done; B8 held for Cody. **Next: B10.**
+- **2026-11-19, session 2:** phase B done except B8, held for Cody. **Next: Cody's calls on B8 and phase C, then D1 (go-public stage 4).**
 - Cody's live Locus state at that point: Sun mode, 3000K, and a hold "off
   until morning" (ends at sunrise, 6:30 AM on 2026-11-20). If a test changes
   the hold at night, put it back with
@@ -72,7 +72,7 @@ Phase B, features that cost nothing to run:
 - [x] B7. Fades that follow twilight (option) (4578241, tested live: the lengths for Los Angeles tonight, 27 min each, and the panel rows)
 - [ ] B8. Daytime tint (off by default): **held for Cody** (see "Decisions waiting on Cody")
 - [x] B9. Location by city name (74f87f4, tested live: Berlin found and shown, a miss, a typo, back to automatic)
-- [ ] B10. Run a command at sunset and sunrise
+- [x] B10. Run a command at sunset and sunrise (tested live: runcommand, and a real on and off edge, each run once, on the minute, under a hold)
 
 Phase C, heavier, each behind a toggle, only if Cody wants them:
 

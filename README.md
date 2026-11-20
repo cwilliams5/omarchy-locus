@@ -61,7 +61,7 @@ omarchy-shell io.github.cwilliams5.locus.control offcommand "omarchy theme set c
 omarchy-shell io.github.cwilliams5.locus.control runcommand on    # Try it now
 ```
 
-They run in the background with `sh -c`, only when the schedule itself changes (Sun or Custom mode), not for holds, pausing or the switch. If the computer was asleep at sunset, the command runs when it wakes; if it slept through the whole night, nothing runs. Restarting the shell doesn't run either. Set one to `""` to stop it. They're saved in `locus.json` as `onCommand` and `offCommand`.
+They run in the background with `sh -c`, only when the schedule itself changes (Sun or Custom mode), including when you change the schedule so it says the other, but not for holds, pausing or the switch. If the computer was asleep at sunset, the command runs when it wakes; if it slept through the whole night, nothing runs. Restarting the shell doesn't run either. Set one to `""` to stop it. They're saved in `locus.json` as `onCommand` and `offCommand`.
 
 ## Pausing for apps
 
