@@ -233,6 +233,51 @@ Panel {
           }
         }
 
+        // Holds: a set time, or the rest of the night, then back to the schedule.
+        Flow {
+          width: parent.width
+          spacing: Style.space(8)
+
+          Button {
+            text: strings.t("hold.off")
+            tooltipText: strings.t("hold.offTip")
+            bordered: true
+            foreground: root.bar.foreground
+            fontFamily: root.bar.fontFamily
+            onClicked: if (root.serviceReady) root.service.hold("off", 60)
+          }
+
+          Button {
+            text: strings.t("hold.on")
+            tooltipText: strings.t("hold.onTip")
+            bordered: true
+            foreground: root.bar.foreground
+            fontFamily: root.bar.fontFamily
+            onClicked: if (root.serviceReady) root.service.hold("on", 60)
+          }
+
+          Button {
+            visible: root.serviceReady && root.service.canHoldUntilMorning
+            text: strings.t("hold.morning")
+            tooltipText: strings.t("hold.morningTip")
+            bordered: true
+            foreground: root.bar.foreground
+            fontFamily: root.bar.fontFamily
+            onClicked: if (root.serviceReady) root.service.hold("morning", 0)
+          }
+
+          Button {
+            visible: root.serviceReady && root.service.holding
+            text: strings.t("hold.resume")
+            tooltipText: strings.t("hold.resumeTip")
+            bordered: true
+            selected: true
+            foreground: root.bar.foreground
+            fontFamily: root.bar.fontFamily
+            onClicked: if (root.serviceReady) root.service.hold("clear", 0)
+          }
+        }
+
         PanelSeparator {
           foreground: root.bar.foreground
         }

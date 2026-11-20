@@ -147,6 +147,9 @@ Item {
   readonly property int fadeOut: settings.fadeOut
   readonly property bool pauseFullscreen: settings.pauseFullscreen
   readonly property var pauseApps: settings.pauseApps
+  readonly property bool holding: settings.override !== null
+  // "Off until morning" needs a schedule to know when morning is.
+  readonly property bool canHoldUntilMorning: mode !== "manual" && !(mode === "sun" && location === null)
 
   onPausedNowChanged: tick()
   onPanelOpenChanged: tick()
@@ -189,11 +192,26 @@ Item {
 
   function setSwitch(turnOn) {
     if (!settingsLoaded) return
+    switchTo(Model.switchPatch(settings, location, Date.now(), turnOn))
+  }
+
+  // A hold from the panel or the command line: "off" or "on" for some minutes,
+  // "morning" or "clear" (Model.holdPatch). False when it doesn't apply.
+  function hold(kind, minutes) {
+    if (!settingsLoaded) return false
+    var patch = Model.holdPatch(settings, location, Date.now(), kind, minutes)
+    if (!patch) return false
+    switchTo(patch)
+    return true
+  }
+
+  // Saves a change to the switch or a hold, then fades to where it leaves the screen.
+  function switchTo(patch) {
     previewTimer.stop()
     previewing = false
     externalHold = false
     switching = true
-    updateSettings(Model.switchPatch(settings, location, Date.now(), turnOn))
+    updateSettings(patch)
     switching = false
     lastPlanOn = wantOn()
     // Also covers a switch that already matched the plan, like after the menu's toggle.
@@ -839,6 +857,14 @@ Item {
     function pauseapp(appClass: string, value: string): string {
       return root.setPausedApp(appClass, value !== "off") ? "ok" : "invalid"
     }
+    // Off or on for some minutes, then back to the schedule: hold off 60.
+    function hold(kind: string, minutes: int): string {
+      return root.hold(kind, minutes) ? "ok" : "invalid"
+    }
+    // Off for the rest of the night (tonight, if it's daytime).
+    function morning(): string { return root.hold("morning", 0) ? "ok" : "needs a schedule" }
+    // End any hold and follow the schedule again.
+    function resume(): void { root.hold("clear", 0) }
     // Pause for the app in front, or stop pausing for it.
     function pausefront(): string {
       if (!root.frontAppPausable) return "no app in front"

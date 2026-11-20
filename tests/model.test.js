@@ -326,6 +326,64 @@ test("the mildest temperature stays clear of hyprsunset's just-started value", (
   }
 })
 
+// ---- Holds for a set time ---------------------------------------------------------
+
+test("off for an hour, then the schedule again", () => {
+  const s = settings({ mode: "custom", onTime: "21:00", offTime: "07:00", temperature: 2000 })
+  const now = at(2026, 11, 5, 22)
+  const held = settings(Object.assign({}, s, Model.holdPatch(s, place, now, "off", 60)))
+  assert.deepStrictEqual(Model.desiredState(held, place, now + 30 * MIN), { on: false, until: now + 60 * MIN })
+  assert.strictEqual(Model.kelvinAt(held, place, now + 30 * MIN), Model.OFF_TEMP)
+  assert.strictEqual(Model.desiredState(held, place, now + 60 * MIN).on, true, "the hold ends on time")
+  assert.strictEqual(Model.nextDueAt(held, place, now + 30 * MIN, []), now + 60 * MIN, "and a check comes then")
+})
+
+test("warm for an hour in the day, at the full temperature", () => {
+  const s = settings({ mode: "custom", onTime: "21:00", offTime: "07:00", temperature: 2000 })
+  const noon = at(2026, 11, 5, 12)
+  const held = settings(Object.assign({}, s, Model.holdPatch(s, place, noon, "on", 60)))
+  assert.strictEqual(Model.kelvinAt(held, place, noon + MIN), 2000, "no warm-up for a hold")
+  assert.strictEqual(Model.kelvinAt(held, place, noon + 61 * MIN), Model.OFF_TEMP)
+})
+
+test("off until morning: the rest of tonight, or all of tonight from the day", () => {
+  const s = settings({ mode: "custom", onTime: "21:00", offTime: "07:00" })
+  const night = Model.holdPatch(s, place, at(2026, 11, 5, 23), "morning")
+  assert.deepStrictEqual(night.override, { on: false, until: at(2026, 11, 6, 7) })
+  const day = Model.holdPatch(s, place, at(2026, 11, 5, 15), "morning")
+  assert.deepStrictEqual(day.override, { on: false, until: at(2026, 11, 6, 7) }, "skips tonight")
+  const sun = settings({ mode: "sun" })
+  const rise = Model.sunTimes(at(2026, 11, 6, 12), place.latitude, place.longitude).sunrise
+  assert.strictEqual(Model.holdPatch(sun, place, at(2026, 11, 5, 23), "morning").override.until, rise)
+  assert.strictEqual(Model.holdPatch(settings({ mode: "manual" }), place, at(2026, 11, 5, 23), "morning"), null, "needs a schedule")
+  assert.strictEqual(Model.holdPatch(sun, null, at(2026, 11, 5, 23), "morning"), null, "and a location in Sun mode")
+})
+
+test("timed holds work in Manual mode, and the switch clears them", () => {
+  const manual = settings({ mode: "manual", manualOn: false, temperature: 2000 })
+  const now = at(2026, 11, 5, 14)
+  const held = settings(Object.assign({}, manual, Model.holdPatch(manual, place, now, "on", 30)))
+  assert.deepStrictEqual(Model.desiredState(held, place, now), { on: true, until: now + 30 * MIN })
+  assert.deepStrictEqual(Model.desiredState(held, place, now + 31 * MIN), { on: false, until: 0 })
+  const flipped = settings(Object.assign({}, held, Model.switchPatch(held, place, now, false)))
+  assert.strictEqual(flipped.override, null)
+})
+
+test("a hold is cleared, and bad requests change nothing", () => {
+  const s = settings({ override: { on: false, until: at(2030, 1, 1) } })
+  assert.deepStrictEqual(Model.holdPatch(s, place, at(2026, 11, 5, 22), "clear"), { override: null })
+  for (const [kind, minutes] of [["sideways", 60], ["off", 0], ["off", -5], ["on", "soon"], ["on", NaN]])
+    assert.strictEqual(Model.holdPatch(s, place, at(2026, 11, 5, 22), kind, minutes), null, kind + " " + minutes)
+  const long = Model.holdPatch(s, place, at(2026, 11, 5, 22), "off", 5000)
+  assert.strictEqual(long.override.until, at(2026, 11, 5, 22) + Model.MAX_HOLD_MINUTES * MIN, "at most 12 hours")
+})
+
+test("a hold changes only the state file", () => {
+  const s = settings({ mode: "custom", temperature: 2000 })
+  const held = settings(Object.assign({}, s, Model.holdPatch(s, place, at(2026, 11, 5, 22), "off", 60)))
+  assert.deepStrictEqual(Model.splitSettings(held).settings, Model.splitSettings(s).settings)
+})
+
 // ---- Settings and state, in two files ------------------------------------------
 
 test("every setting has exactly one home", () => {

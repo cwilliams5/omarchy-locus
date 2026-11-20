@@ -35,7 +35,7 @@ With **Gradual** on, which is the default, Sun and Custom modes warm the screen 
 
 A fade moves in steps of about 3 mireds, under what the eye can tell apart, so an hour from 6500K to 3000K is about 60 steps. Locus looks at `hyprsunset` when something is due (a scheduled change, the next fade step, a switch time in `hyprsunset.conf`) and otherwise once a minute, so a change made elsewhere is noticed within a minute. It always looks before it sends anything, so it never overwrites a change it hasn't seen yet.
 
-Flipping the switch during a schedule holds until the next scheduled change, even across restarts. Moving the slider while the night light is off previews that temperature for 10 seconds.
+Flipping the switch during a schedule holds until the next scheduled change, even across restarts. The buttons under it hold for a set time instead: **Off 1 h** and **Warm 1 h**, then back to the schedule; **Off till morning** for the rest of the night (or for tonight, if it's still day); and **Back to schedule** ends any hold. Timed holds work in Manual mode too. Moving the slider while the night light is off previews that temperature for 10 seconds.
 
 `hyprsunset` stops at 1000K, and on some screens that is more orange than red. Below 1000K, Locus leaves `hyprsunset` there and adds a Hyprland screen shader that takes away more green and blue, until 500K shows only red. A screen shader you already use, like a grayscale one, keeps working underneath. The shader goes away on a config reload and comes back within a minute.
 
@@ -83,6 +83,9 @@ omarchy-shell $ID location "52.52, 13.40"
 omarchy-shell $ID location ""           # Back to the automatic location
 omarchy-shell $ID ramp off              # Or on: change gradually
 omarchy-shell $ID autolocation on       # Or off: detect location from your IP
+omarchy-shell $ID hold off 60           # Off for 60 minutes; or hold on 60: warm for 60
+omarchy-shell $ID morning               # Off for the rest of the night
+omarchy-shell $ID resume                # End any hold
 omarchy-shell $ID offset 30             # Sun mode starts 30 min before sunset; negative is after
 omarchy-shell $ID fade 60 30            # Warm-up and clear-down in minutes, 0 to 180
 omarchy-shell $ID pausefullscreen on    # Or off
@@ -137,8 +140,9 @@ Locus is a hard fork of [Sundown](https://github.com/WilliamJohnDavisIII/omarchy
 
 Ideas, not code, from:
 
-- [Dusk](https://github.com/ReidenXerx/omarchy-dusk) by ReidenXerx (MIT): starting before sunset; a fade length you choose; stepping aside for fullscreen apps and apps you name, with a button for the app in front; spacing fade steps by what the eye can tell apart (a few mireds) and looking about once a minute; reading `hyprsunset.conf`'s own switch times so they aren't taken for you.
-- [f.lux](https://justgetflux.com): the night light the rest descend from, including disabling for fullscreen apps and for the app in front.
+- [Dusk](https://github.com/ReidenXerx/omarchy-dusk) by ReidenXerx (MIT): starting before sunset; a fade length you choose; stepping aside for fullscreen apps and apps you name, with a button for the app in front; spacing fade steps by what the eye can tell apart (a few mireds) and looking about once a minute; reading `hyprsunset.conf`'s own switch times so they aren't taken for you; "off until morning" and "warm for an hour".
+- [f.lux](https://justgetflux.com): the night light the rest descend from, including disabling for fullscreen apps, for the app in front, and for an hour.
+- [Night Light](https://github.com/key-tone/omarchy-nightlight) by Kenny Keeton: pausing for an hour, or until sunrise.
 
 ## License
 

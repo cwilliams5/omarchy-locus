@@ -29,6 +29,7 @@ var MIN_SEND_MIREDS = STEP_MIREDS / 2
 var MIN_STEP_MS = 5000
 var CHECK_MS = 60000 // Longest gap between looks at hyprsunset when nothing is due
 var PROFILE_RECHECK_MS = [2000, 62000] // After a hyprsunset.conf switch time; it can land up to a minute late
+var MAX_HOLD_MINUTES = 720
 var PAUSE_APPS_MAX = 32
 var APP_NAME_MAX = 64
 
@@ -420,10 +421,12 @@ function followsSwitch(settings, location) {
 }
 
 // What the screen should be doing now. `until` is 0 when nothing will change it.
+// A hold comes first, in every mode: a timed one ("off for an hour") applies in
+// Manual mode too. Flipping the main switch clears it.
 function desiredState(settings, location, nowMs) {
-  if (followsSwitch(settings, location)) return { on: settings.manualOn, until: 0 }
   var override = settings.override
   if (override && nowMs < override.until) return { on: override.on, until: override.until }
+  if (followsSwitch(settings, location)) return { on: settings.manualOn, until: 0 }
   var schedule = scheduleAt(settings, location, nowMs)
   return { on: schedule.on, until: schedule.next }
 }
@@ -619,6 +622,24 @@ function switchPatch(settings, location, nowMs, turnOn) {
   return { override: { on: turnOn, until: schedule.next } }
 }
 
+// A hold chosen from the panel or the command line: "off" or "on" for a number
+// of minutes (1 to 12 hours), "morning" (off until the night ends; in the day,
+// that skips tonight), or "clear" (back to the schedule). Null when it doesn't
+// apply: "morning" needs a schedule, and an unknown kind or length.
+function holdPatch(settings, location, nowMs, kind, minutes) {
+  if (kind === "clear") return { override: null }
+  if (kind === "morning") {
+    if (followsSwitch(settings, location)) return null
+    var schedule = scheduleAt(settings, location, nowMs)
+    var end = schedule.on ? schedule.next : scheduleAt(settings, location, schedule.next).next
+    return { override: { on: false, until: end } }
+  }
+  if (kind !== "on" && kind !== "off") return null
+  if (!Number.isFinite(Number(minutes)) || Number(minutes) <= 0) return null
+  var length = clampInt(minutes, 1, MAX_HOLD_MINUTES)
+  return { override: { on: kind === "on", until: nowMs + length * MINUTE_MS } }
+}
+
 function modePatch(settings, mode, currentlyOn) {
   if (mode === "manual") return { mode: mode, manualOn: currentlyOn, override: null, rampSkipUntil: 0 }
   return { mode: mode, override: null, rampSkipUntil: 0 }
@@ -682,6 +703,8 @@ if (typeof module !== "undefined") {
     kelvinAt: kelvinAt,
     holdEndPatch: holdEndPatch,
     switchPatch: switchPatch,
-    modePatch: modePatch
+    modePatch: modePatch,
+    holdPatch: holdPatch,
+    MAX_HOLD_MINUTES: MAX_HOLD_MINUTES
   }
 }

@@ -36,5 +36,13 @@
   "pause.front": "Pause whenever this app is in front",
   "pause.frontStop": "Stop pausing for this app",
   "pause.remove": "Stop pausing for it",
-  "pause.none": "No app in front"
+  "pause.none": "No app in front",
+  "hold.off": "Off 1 h",
+  "hold.offTip": "Off for an hour, then back to the schedule",
+  "hold.on": "Warm 1 h",
+  "hold.onTip": "Warm for an hour, then back to the schedule",
+  "hold.morning": "Off till morning",
+  "hold.morningTip": "Off for the rest of the night, or for tonight if it's still day",
+  "hold.resume": "Back to schedule",
+  "hold.resumeTip": "End the hold and follow the schedule again"
 }
