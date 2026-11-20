@@ -390,13 +390,17 @@ function desiredState(settings, location, nowMs) {
 }
 
 // A step between two temperatures, even to the eye rather than even in Kelvin, so
-// the change doesn't bunch up at the warm end. Rounded to 10K, and never exactly
-// FRESH_TEMP, which is how a restarted hyprsunset is recognized.
+// the change doesn't bunch up at the warm end. Rounded to 10K, which is under a
+// mired from 2500K up, and to 1K below that, where 10K grows to 10 mireds at
+// 1000K and fades would step visibly. Never exactly FRESH_TEMP, which is how a
+// restarted hyprsunset is recognized.
+var FINE_ROUNDING_BELOW = 2500
 function mixKelvin(from, to, progress) {
   if (progress <= 0) return from
   if (progress >= 1) return to
   var kelvin = 1000000 / (1000000 / from + progress * (1000000 / to - 1000000 / from))
-  var rounded = Math.round(kelvin / 10) * 10
+  var unit = kelvin < FINE_ROUNDING_BELOW ? 1 : 10
+  var rounded = Math.round(kelvin / unit) * unit
   return rounded === FRESH_TEMP ? rounded + 10 : rounded
 }
 

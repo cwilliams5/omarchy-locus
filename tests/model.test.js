@@ -622,6 +622,17 @@ test("the clear-down steps as evenly as the warm-up and ends on time", () => {
   assert.ok(Math.abs(Model.rampAt(s, place, at(2026, 11, 5, 21, 15)).remainingMs - 45 * MIN) < 1, "and the warm-up's")
 })
 
+test("fades to deep red step finely too", () => {
+  const s = settings({ mode: "custom", onTime: "21:00", offTime: "07:00", temperature: 1000 })
+  const run = simulate(s, place, at(2026, 11, 5, 20, 50), at(2026, 11, 5, 22, 10))
+  const fade = run.steps.filter((x) => x.from !== null && x.to !== 1000 && x.to !== Model.OFF_TEMP)
+  assert.ok(fade.length > 100, fade.length + " steps")
+  for (const x of fade) assert.ok(miredGap(x.from, x.to) <= 5, "a step the eye could catch: " + x.from + " to " + x.to)
+  // Above 2500K it still rounds to 10K, so readings stay tidy.
+  assert.strictEqual(Model.mixKelvin(Model.OFF_TEMP, 3000, 0.37) % 10, 0)
+  assert.strictEqual(Model.mixKelvin(Model.OFF_TEMP, 1000, 0.9) % 10 === 0, false, "fine below 2500K")
+})
+
 test("the next check comes when something is due", () => {
   const s = settings({ mode: "custom", onTime: "21:00", offTime: "07:00", temperature: 3000 })
   assert.strictEqual(Model.nextDueAt(s, place, at(2026, 11, 5, 20), []), at(2026, 11, 5, 21), "the switch on")
