@@ -166,7 +166,7 @@ Gotchas met so far:
 - **Dimming** (B4): `nightAt` (the night under way; shared with bedtime),
   `dimAt`, `gammaAt`, `gammaStepMs`. The service's gamma is its own process
   (`syncGamma`, `gammaSent`), run only when the wanted value changes, and
-  not read back (see CLAUDE.md rule 12).
+  not read back (see CLAUDE.md rule 11).
 - Screenshots: Cody's Bitwarden window blanks itself out of screen captures
   (a black rectangle), even under the panel. Don't move it; read around it.
 
