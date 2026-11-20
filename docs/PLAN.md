@@ -20,6 +20,16 @@ in the same commit as the work.
    `~/Work/go-public-trials/sundown.md` (outside every repo); after
    development, go-public resumes at stage 4 (README + media).
 
+## Where things stand (update this when you stop)
+
+- **2026-11-19, end of session 1:** A1, A2, B1 done, merged, pushed, tested
+  live; the installed copy is on `main`; dotfiles updated. **Next: B2.**
+- Cody's live Locus state at that point: Sun mode, 3000K, and a hold "off
+  until morning" (ends at sunrise, 6:30 AM on 2026-11-20). If a test changes
+  the hold at night, put it back with
+  `omarchy-shell io.github.cwilliams5.locus.control morning`; after sunrise
+  the hold has ended by itself and there's nothing to restore.
+
 ## Ground rules for every item
 
 - **Resources:** a feature that only adds scheduled changes is free and can
@@ -75,6 +85,77 @@ Phase D, back to go-public:
 
 - [ ] D1. README and media (go-public stage 4), then publish (5), marketplace (6)
 - [ ] D2. Point the old fork's README at Locus once Locus is public
+
+## Working procedure (the exact steps used for A1 to B1)
+
+```bash
+cd ~/Work/omarchy-locus && git switch -c <item-branch>
+# ... edit Model.js (+ tests), Service.qml, Panel.qml, i18n/en.json, README.md ...
+for tz in America/New_York America/Los_Angeles UTC; do TZ=$tz node tests/model.test.js >/dev/null && echo "$tz ok"; done
+omarchy plugin validate .
+/usr/lib/qt6/bin/qmllint -I /usr/lib/qt6/qml -I /usr/share/omarchy/shell Service.qml Panel.qml 2>&1 | grep '^Error'
+git commit ...                       # what and why, ending with the Co-Authored-By line
+# Live test: load the branch into the installed clone and restart the shell
+D=~/.config/omarchy/plugins/io.github.cwilliams5.locus
+git -C $D fetch -q ~/Work/omarchy-locus <item-branch> && git -C $D checkout -q --detach FETCH_HEAD
+omarchy restart shell; sleep 5
+omarchy-shell io.github.cwilliams5.locus.control status | jq .
+L=$(ls -td /run/user/$UID/quickshell/by-pid/*/ | head -1)log.log; grep -ciE 'ReferenceError|TypeError|SyntaxError' $L
+# Panel screenshot (warn Cody; the panel opens on screen): grim takes LOGICAL
+# coordinates (the laptop is 2400x1600 at scale 2 = 1200x800 logical)
+omarchy-shell io.github.cwilliams5.locus open; sleep 0.8
+grim -g "780,0 420x800" <scratch>/panel.png; omarchy-shell io.github.cwilliams5.locus close
+# ...look at it, then delete it (it shows part of Cody's screen)
+# Land it
+git switch main && git merge --ff-only <item-branch> && git branch -d <item-branch>
+# tick the item in this file's Status (with the commit and "tested live"), commit, push
+git -C $D checkout -q main && omarchy plugin update io.github.cwilliams5.locus --yes
+# (plus omarchy restart shell if QML changed since the live test)
+# Dotfiles: update the Locus row in ~/Work/dotfiles/docs/customizations.md;
+# if Locus's settings changed shape, chezmoi re-add ~/.local/state/omarchy/settings/locus.json
+cd ~/Work/dotfiles && chezmoi status && chezmoi git -- add -A && chezmoi git -- commit -m ... && chezmoi git -- push
+```
+
+Gotchas met so far:
+- `omarchy plugin add/update` and status calls right after them can print
+  "omarchy-shell is not responding": the shell is rescanning. Wait and retry.
+- Visible tests at night: warn Cody first, keep them to seconds, restore the
+  hold afterwards (see "Where things stand").
+- Never edit the settings files by hand (`cat >`): Locus reads a half-written
+  file as empty and saves its memory over it. Use IPC; to simulate chezmoi,
+  write a temp file and rename it over (keeps working).
+- When a test should fail on the old code, prove it: `git stash push Model.js`,
+  run, `git stash pop`.
+
+## Code map, for adding a feature
+
+- **`Model.js`** (pure, tested): `defaultSettings`, `normalizeSettings`
+  (validate every new key here), `SETTING_KEYS` / `STATE_KEYS` (every new key
+  needs a home; a test enforces it), `scheduleAt` / `scheduleStart` /
+  `sunOn`, `desiredState` (holds first, then Manual, then the schedule),
+  `kelvinAt` (the screen's temperature now) and `rampAt` (the fade in
+  progress), `nextDueAt` (**every new timed change must appear here**),
+  `fadeStepMs`, `isVisibleStep`, `isBigJump`, `holdPatch`, `switchPatch`,
+  `modePatch`, `pausedFor`, `hyprsunsetProfiles`, exports at the bottom.
+- **`Service.qml`**: `updateSettings(patch)` (saves each file's half only if
+  changed), `switchTo(patch)` (holds and the switch, fading), `tick()` ->
+  probe -> `handleProbe()` -> `step()`, `scheduleNext()`, `apply()` /
+  `runApply()` (the hyprctl call; B4's gamma goes next to the temperature
+  here), `syncShader()`, readonly properties the panel binds to, and the
+  `ShellIpc` block at the end (one function per command; document each in the
+  README's Commands).
+- **`Panel.qml`** top to bottom: `PanelHero` (title, status, switch) -> the
+  hold buttons (`Flow`) -> separator -> Temperature (`PanelSlider`; B2's
+  preset buttons go here) -> separator -> Schedule column (mode
+  `ButtonGroup`, Custom's `TimeRow`s, sunset/sunrise, Start `StepRow`,
+  Gradual `SwitchRow`, the fade `StepRow`s, location row and field; B3's
+  bedtime and B4's dimming rows go here, or in their own section) ->
+  separator -> Pause column. Local components at the end: `SwitchRow`,
+  `StepRow`, `TimeRow`. All text `Text.PlainText`; strings in `i18n/en.json`
+  via `strings.t()`. The panel scrolls (`Flickable`) when the screen is short.
+- **B2 note:** a hold with its own temperature (Movie mode) means the
+  `override` grows to `{ on, until, temperature }`: accept and clamp it in
+  `normalizeSettings`, and make `kelvinAt` use it while the hold lasts.
 
 ## Phase A
 
@@ -279,8 +360,12 @@ dark theme at night. Credit f.lux (dark mode at sunset) and Redshift's hooks.
 
 ## Decisions waiting on Cody
 
-- B2 preset temperatures and Movie mode's temperature.
-- B3 default bedtime, bedtime temperature, weekend delay.
+- ~~B2 preset temperatures and Movie mode's temperature.~~ **Settled
+  2026-11-19:** Cody let the proposed defaults stand (Candle 1900K, Warm 2700K,
+  Night 3400K, Mild 4500K; Movie mode 5000K for 2.5 h). Go ahead.
+- ~~B3 default bedtime, bedtime temperature, weekend delay.~~ **Settled:**
+  proposed defaults stand (bedtime off by default, 22:30, 2200K, 60 min later
+  on Friday and Saturday nights).
 - B8 whether daytime tint is wanted at all.
 - Phase C: which, if any.
 - Housekeeping, optional: hide Omarchy's own Night Light icon so there's one
