@@ -126,7 +126,13 @@ icon.svg           the app tile
    must be opt-in. Features that only add a scheduled change cost nothing and
    can just be on.
 10. **Never edit Omarchy's files** (`/usr/share/omarchy`); read them freely.
-11. **Run the privacy scan before the repo goes public, and before every push
+11. **Gamma (late-night dimming) is sent only when the wanted value changes,
+    and not read back on every check** (`syncGamma`, `gammaSent`). Nothing
+    in Omarchy sets gamma, so reading it would cost a second process per
+    check for nothing. What does reset it is known: a restarted hyprsunset
+    starts at 100%, and a `hyprsunset.conf` switch sets the profile's, so
+    `handleProbe` marks it 100 or unknown there and it is sent again.
+12. **Run the privacy scan before the repo goes public, and before every push
     once it is** (`~/.claude/skills/go-public/scripts/privacy-scan.sh .`),
     as the last step, after every file (this one included) is final.
 
@@ -168,6 +174,10 @@ Quickshell 0.3.2.
 - hyprsunset waits for its next profile in one-minute naps on a clock that
   stops during sleep, so a switch time passed while asleep lands up to a
   minute late. Locus looks at +2 s and +62 s and keeps a two-minute grace.
+- `hyprctl hyprsunset gamma [percent]`: gamma multiplies whatever matrix is
+  set, identity included, so dimming works with the tint off. hyprsunset
+  starts at 100%, and every profile switch sets the profile's gamma (100%
+  unless it names one).
 - Hyprland reports a cleared `decoration:screen_shader` as `""` with
   `set: true` once anything has set it, not `[[EMPTY]]`.
 - The Omarchy UI kit (`qs.Ui`: `KeyboardPanel`, `Button`, `PanelHero`...)
