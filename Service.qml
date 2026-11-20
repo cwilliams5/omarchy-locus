@@ -78,6 +78,8 @@ Item {
   readonly property bool locationChecked: weatherChecked && zoneNameChecked && zoneTableChecked
 
   property var plan: ({ on: false, until: 0 })
+  // What the status line says: Model.statusAt, worked out on each check.
+  property var status: ({ kind: "off", at: 0 })
   // Bedtime has come tonight, so the slider and presets set the bedtime level.
   // Worked out on each check, since it depends on the clock.
   property bool bedtimeNow: false
@@ -101,7 +103,7 @@ Item {
   property var lastLevel: null
   // Something else set the temperature, so ramp steps wait for the next change.
   property bool externalHold: false
-  // setSwitch fades for itself, so tick() leaves the screen alone meanwhile.
+  // switchTo fades for itself, so tick() leaves the screen alone meanwhile.
   property bool switching: false
   property int fadeFrom: 0
   property int fadeTarget: 0
@@ -159,9 +161,8 @@ Item {
   readonly property bool nightOn: fadeTimer.running
     ? fadeTarget < Model.FRESH_TEMP
     : actualTemp !== null && (actualTemp < Model.FRESH_TEMP || (plan.on && !externalHold && !pausedNow))
-  // The switch shows the schedule's answer, so it stays on while a paused app
-  // keeps the screen neutral.
-  readonly property bool switchOn: (nightOn || (pausedNow && plan.on && !externalHold)) && !(previewing && !plan.on)
+  // Locus on or off: the panel's switch. Off does nothing until turned on.
+  readonly property bool enabled: settings.enabled
   readonly property string mode: settings.mode
   readonly property int temperature: settings.temperature
   readonly property string onTime: settings.onTime
@@ -193,7 +194,7 @@ Item {
   // Twilight fades apply in Sun mode with a location.
   readonly property bool followsTwilight: twilight && mode === "sun" && location !== null
   // Following a schedule, rather than the switch alone.
-  readonly property bool scheduled: mode !== "manual" && !(mode === "sun" && location === null)
+  readonly property bool scheduled: enabled && mode !== "always" && !(mode === "sun" && location === null)
   // "Off until morning" needs a schedule to know when morning is.
   readonly property bool canHoldUntilMorning: scheduled
 
@@ -233,12 +234,13 @@ Item {
   }
 
   function setMode(value) {
-    updateSettings(Model.modePatch(settings, value, switchOn))
+    updateSettings(Model.modePatch(settings, value))
   }
 
-  function setSwitch(turnOn) {
+  // Locus on or off. Either way any hold ends, and the screen fades to match.
+  function setEnabled(on) {
     if (!settingsLoaded) return
-    switchTo(Model.switchPatch(settings, location, Date.now(), turnOn))
+    switchTo(Model.enablePatch(on))
   }
 
   // A hold from the panel or the command line: "off" or "on" for some minutes,
@@ -251,7 +253,7 @@ Item {
     return true
   }
 
-  // Saves a change to the switch or a hold, then fades to where it leaves the screen.
+  // Saves a change to Locus on/off or a hold, then fades to where it leaves the screen.
   function switchTo(patch) {
     previewTimer.stop()
     previewing = false
@@ -558,6 +560,7 @@ Item {
       sunset = 0
     }
     plan = Model.desiredState(settings, location, now)
+    status = Model.statusAt(settings, location, now)
     var scheduled = Model.scheduleOn(settings, location, now)
     var command = Model.scheduleCommand(settings, lastScheduleOn, scheduled)
     lastScheduleOn = scheduled
@@ -1019,7 +1022,9 @@ Item {
     function status(): string {
       return JSON.stringify({
         on: root.nightOn,
-        switchOn: root.switchOn,
+        enabled: root.enabled,
+        status: root.status.kind,
+        next: root.status.at ? new Date(root.status.at).toLocaleString() : "",
         temperature: root.actualTemp,
         savedTemperature: root.temperature,
         mode: root.mode,
@@ -1060,9 +1065,10 @@ Item {
         nextCheckSeconds: Math.max(0, Math.round((root.nextCheckAt - Date.now()) / 1000))
       })
     }
-    function on(): void { root.setSwitch(true) }
-    function off(): void { root.setSwitch(false) }
-    function toggle(): void { root.setSwitch(!root.switchOn) }
+    // Locus on (follow the mode) or off (until turned on again); either ends any hold.
+    function on(): void { root.setEnabled(true) }
+    function off(): void { root.setEnabled(false) }
+    function toggle(): void { root.setEnabled(!root.enabled) }
     function set(kelvin: int): void { root.setTemperature(kelvin) }
     // Save a preset's temperature: mild, night, warm or candle.
     function preset(name: string): string { return root.setPreset(name) ? "ok" : "invalid" }
@@ -1106,6 +1112,7 @@ Item {
     // Milder (5000K) for two and a half hours, then back to the schedule.
     function movie(): string { return root.hold("movie", 0) ? "ok" : "invalid" }
     function preview(kelvin: int): void { root.preview(kelvin) }
+    // sun, custom or always ("manual" still means always).
     function schedule(mode: string): void { root.setMode(mode) }
     // "52.52, 13.40", a city (looked up once; see status), or "" for automatic.
     function location(place: string): string { return root.setLocation(place) }
@@ -1128,7 +1135,7 @@ Item {
       return root.hold(kind, minutes) ? "ok" : "invalid"
     }
     // Off for the rest of the night (tonight, if it's daytime).
-    function morning(): string { return root.hold("morning", 0) ? "ok" : "needs a schedule" }
+    function morning(): string { return root.hold("morning", 0) ? "ok" : "needs Locus on, in Sun or Custom mode" }
     // End any hold and follow the schedule again.
     function resume(): void { root.hold("clear", 0) }
     // Pause for the app in front, or stop pausing for it.

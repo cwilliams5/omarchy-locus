@@ -3,6 +3,7 @@ import Quickshell
 import qs.Commons
 import qs.Commons as Commons
 import "Registry.js" as Registry
+import "Status.js" as Status
 import qs.Ui
 
 // Optional: the night light icon as one of Omarchy's indicators instead of its
@@ -23,10 +24,16 @@ BarIndicator {
 
   active: serviceReady && service.nightOn
   activeText: "󰔎"
-  activeTooltipText: strings.t("tooltip.on").arg(root.shownTemp)
-  inactiveTooltipText: serviceReady && service.pausedNow
-    ? strings.t("tooltip.paused").arg(service.frontLabel)
-    : strings.t("tooltip.off")
+  activeTooltipText: Status.tooltip(serviceReady ? service : null, function(key) { return strings.t(key) }, clockText, shownTemp)
+  inactiveTooltipText: activeTooltipText
+
+  // As the panel shows times (Panel.qml's clockText).
+  function clockText(milliseconds) {
+    if (!milliseconds) return ""
+    return new Date(milliseconds)
+      .toLocaleTimeString(Qt.locale(Commons.I18n.formatLocale), Locale.ShortFormat)
+      .replace(/[\u202f\u2009\u00a0]/g, " ")
+  }
 
   Commons.Translations { id: strings; directory: Qt.resolvedUrl("i18n") }
 
@@ -57,13 +64,13 @@ BarIndicator {
 
   onPressed: function(pressedButton) {
     if (!root.serviceReady) return
-    if (pressedButton === Qt.RightButton) root.service.setSwitch(!root.service.switchOn)
+    if (pressedButton === Qt.RightButton) root.service.setEnabled(!root.service.enabled)
     else root.service.panelToggleRequested(root.QsWindow.window)
   }
 
   onWheelMoved: function(delta) {
     var wheel = Util.wheelSteps(root.wheelAccumulator, delta)
     root.wheelAccumulator = wheel.remainder
-    if (wheel.steps !== 0 && root.serviceReady) root.service.setTemperature(root.service.temperature - wheel.steps * 100)
+    if (wheel.steps !== 0 && root.serviceReady) root.service.setTemperature(root.service.activeTemperature - wheel.steps * 100)
   }
 }

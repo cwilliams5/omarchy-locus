@@ -20,10 +20,10 @@ Omarchy's own night light icon stays in the indicators widget. To leave only Loc
 | Do this | And |
 |---|---|
 | Left-click the icon | Open the panel |
-| Right-click the icon | Flip the switch |
+| Right-click the icon | Turn Locus on or off |
 | Scroll on the icon | Change the temperature |
 
-In the panel, Left and Right change the temperature, Enter flips the switch, and `m` changes the mode.
+In the panel, Left and Right change the temperature, Enter turns Locus on or off, and `m` changes the mode.
 
 Under the hold buttons, a strip shows the day from noon to noon: when the screen warms and clears, how strong the tint is, bedtime and dimming, any hold, and a mark for now. It's worked out when the panel opens or a setting changes, so it costs nothing while the panel is closed.
 
@@ -31,15 +31,17 @@ The modes are:
 
 - **Sun:** on from sunset to sunrise. **Start** moves the beginning up to 3 hours before sunset or 2 hours after it, in 15-minute steps.
 - **Custom:** on between two times you choose
-- **Manual:** stays how you set it
+- **Always:** warm whenever Locus is on
 
-With **Gradual** on, which is the default, Sun and Custom modes warm the screen over the hour after they turn on, and clear it over the 30 minutes before they turn off. **Warm up over** and **Clear over** change those lengths, from at once to 3 hours. Turn Gradual off to change at the scheduled time instead. Flipping the switch always takes about 2 seconds.
+With **Gradual** on, which is the default, Sun and Custom modes warm the screen over the hour after they turn on, and clear it over the 30 minutes before they turn off. **Warm up over** and **Clear over** change those lengths, from at once to 3 hours. Turn Gradual off to change at the scheduled time instead. Turning Locus on or off always takes about 2 seconds.
 
 In Sun mode, **Follow twilight** times the fades by the sky instead: the screen warms from the start until civil dusk (when the sun is 6 degrees below the horizon) and clears from civil dawn until sunrise, so the fades are longer in summer and in the far north. With **Start** before sunset, the warm-up starts that much earlier. Where the sun never gets that low, as on summer nights in the far north, the lengths you set apply.
 
 A fade moves in steps of about 3 mireds, under what the eye can tell apart, so an hour from 6500K to 3000K is about 60 steps. Locus looks at `hyprsunset` when something is due (a scheduled change, the next fade step, a switch time in `hyprsunset.conf`) and otherwise once a minute, so a change made elsewhere is noticed within a minute. It always looks before it sends anything, so it never overwrites a change it hasn't seen yet.
 
-Flipping the switch during a schedule holds until the next scheduled change, even across restarts. The buttons under it hold for a set time instead: **Off 1 h** and **Warm 1 h**, then back to the schedule; **Movie 2.5 h**, milder (5000K) for long enough to watch a film; **Off till morning** for the rest of the night (or for tonight, if it's still day); and **Back to schedule** ends any hold. Timed holds work in Manual mode too. Choosing a temperature during Movie mode keeps the hold but shows the temperature you chose.
+The switch at the top of the panel turns Locus on or off, like the switches in Omarchy's other panels. On, it follows the mode. Off, it leaves the screen alone until you turn it on again, through restarts too, and the icon shows the arc without its point. The line under the title says what happens next: "Warm until 6:30 AM", "Warms at 4:47 PM", "Warm", or "Off".
+
+For a while rather than for good, use the buttons under it: **Off 1 h** and **Warm 1 h**, then back to the schedule; **Movie 2.5 h**, milder (5000K) for long enough to watch a film; **Off till morning** for the rest of the night (or for tonight, if it's still day); and **Back to schedule** ends any hold. Turning Locus on or off ends a hold too. **Warm 1 h** and **Movie 2.5 h** also work while Locus is off, which it is again when they end. Choosing a temperature during Movie mode keeps the hold but shows the temperature you chose.
 
 Under the slider, **Mild**, **Night**, **Warm** and **Candle** set 4500K, 3400K, 2700K and 1900K in one click. Moving the slider while the night light is off previews that temperature for 10 seconds.
 
@@ -61,7 +63,7 @@ omarchy-shell io.github.cwilliams5.locus.control offcommand "omarchy theme set c
 omarchy-shell io.github.cwilliams5.locus.control runcommand on    # Try it now
 ```
 
-They run in the background with `sh -c`, only when the schedule itself changes (Sun or Custom mode), including when you change the schedule so it says the other, but not for holds, pausing or the switch. If the computer was asleep at sunset, the command runs when it wakes; if it slept through the whole night, nothing runs. Restarting the shell doesn't run either. Set one to `""` to stop it. They're saved in `locus.json` as `onCommand` and `offCommand`.
+They run in the background with `sh -c`, only when the schedule itself changes (Sun or Custom mode), including when you change the schedule so it says the other, but not for holds, pausing, or turning Locus on or off. While Locus is off, nothing runs. If the computer was asleep at sunset, the command runs when it wakes; if it slept through the whole night, nothing runs. Restarting the shell doesn't run either. Set one to `""` to stop it. They're saved in `locus.json` as `onCommand` and `offCommand`.
 
 ## Pausing for apps
 
@@ -72,7 +74,7 @@ Some apps need true colour, like games and photo or video editors. Locus can kee
 
 A name ending in `*` matches every app whose class starts with the rest, so `steam_app_*` covers every game started from Steam. Add one like that with the `pauseapp` command below.
 
-While an app has it paused, the switch still shows what the schedule says, and the icon's tooltip names the app. Locus hears about focus and fullscreen changes from Hyprland, so pausing adds no checking of its own.
+While an app has it paused, the switch stays on, and the status line and the icon's tooltip name the app. Locus hears about focus and fullscreen changes from Hyprland, so pausing adds no checking of its own.
 
 ## Location
 
@@ -85,7 +87,7 @@ Sun mode uses the first of these it finds:
 
 A city is looked up once, when you press Enter, with [Open-Meteo](https://open-meteo.com)'s geocoding service, which receives the name you typed and nothing else. The first place it finds is kept with its coordinates, so it isn't asked again; if it picks the wrong one, enter coordinates instead. Place names come from [GeoNames](https://www.geonames.org) (CC BY 4.0).
 
-The time zone is only a rough guide, so sunset can be off by a while if you live far from that city. If none of these is available, the switch stays how you set it until you enter a location.
+The time zone is only a rough guide, so sunset can be off by a while if you live far from that city. If none of these is available, Sun mode is warm whenever Locus is on, as in Always mode, until you enter a location.
 
 Location detection is off by default. It asks `geo.omarchy.org` for the city of your IP address, as Omarchy's weather widget does, when the shell starts, every few hours, and after a long sleep. The last answer is kept so it works offline, and is deleted when you turn this off. A VPN will make it report the VPN's location.
 
@@ -97,12 +99,12 @@ Your settings are saved in `~/.local/state/omarchy/settings/locus.json`. The cit
 ID=io.github.cwilliams5.locus.control
 
 omarchy-shell $ID status
-omarchy-shell $ID on
-omarchy-shell $ID off
+omarchy-shell $ID on                    # Locus on: follow the mode
+omarchy-shell $ID off                   # Locus off until you turn it on
 omarchy-shell $ID toggle
 omarchy-shell $ID set 3000              # Save a temperature, from 500 to 5500
 omarchy-shell $ID preset candle         # Or mild, night, warm
-omarchy-shell $ID schedule sun          # Or manual, or custom
+omarchy-shell $ID schedule sun          # Or custom, or always
 omarchy-shell $ID hours 21:00 07:00     # Custom on and off times
 omarchy-shell $ID location "52.52, 13.40"
 omarchy-shell $ID location Berlin       # Looked up once; status shows what it found

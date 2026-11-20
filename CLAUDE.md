@@ -57,7 +57,7 @@ hyprsunset will switch by itself.
   (`~/Work/dotfiles`, chezmoi) list it by URL in `plugins.yaml` and describe
   it in `docs/customizations.md`. Settings live in
   `~/.local/state/omarchy/settings/locus.json`, which the dotfiles track;
-  holds, the manual switch and coordinates in `locus-state.json`, never
+  holds, Locus on/off and coordinates in `locus-state.json`, never
   tracked.
 
 ## Layout
@@ -111,8 +111,8 @@ icon.svg           the app tile
    processes a day for nothing. Removing the shader takes one run; the first
    check after a shell start runs it once to clear a leftover.
 7. **Two files, each written only when its half changed.** Settings (Cody's
-   choices) in `locus.json`, tracked by his dotfiles; state (holds, the
-   manual switch, typed and detected coordinates) in `locus-state.json`,
+   choices) in `locus.json`, tracked by his dotfiles; state (holds, Locus
+   on/off, typed and detected coordinates) in `locus-state.json`,
    never tracked, so location never reaches git and a hold never rewrites the
    tracked file. Every key has one home (`Model.SETTING_KEYS` /
    `STATE_KEYS`; a test fails if a new setting has none). Both files are mode
@@ -146,10 +146,17 @@ icon.svg           the app tile
 - `Model.kelvinAt(settings, location, now, paused)` is the whole schedule as
   a pure function of the time: off, the temperature, or a point along a fade
   (`rampAt`; even steps in mireds via `mixKelvin`). A paused app forces off.
-- `Model.desiredState` holds the switch logic: Sun, Custom or Manual, a hold
-  (`override`: until the next scheduled change, or a set time, optionally
-  with its own temperature for Movie mode), and Sun mode with no location
-  following the switch instead.
+- `Model.desiredState` holds the on/off logic: a hold first (`override`: a
+  set time or till morning, optionally with its own temperature for Movie
+  mode; it works even while Locus is off), then Locus off (`enabled`, the
+  panel's switch: off until turned on), then the mode: Sun, Custom, or
+  Always (warm whenever on; Sun mode with no location acts the same).
+  `Model.statusAt` / `nextChange` give the status line the next time the
+  screen really changes, not when a hold expires. The switch used to mean
+  "warm now" and held until the next change; Cody found that confusing (off
+  read "off until 6:30 AM"), so it became Omarchy-style on/off on 2026-11-20.
+  Old files migrate in `combineSettings` (Manual becomes Always, on only if
+  its `manualOn` was).
 - Over the night, `Model.targetKelvin` moves from the saved temperature to
   the bedtime level (`bedtimeAt`), and `Model.gammaAt` eases dimming in
   (`dimAt`) and back out with the clear-down. `nightAt` places clock times
@@ -254,12 +261,13 @@ then), and the marketplace.
 Done in the development phase: settings and state in two files, finer
 rounding for deep red, timed holds, presets and Movie mode, the bedtime
 level, late-night dimming, the Arc mark as the bar icon, the 24-hour view,
-twilight fades, location by city name, commands at sunset and sunrise.
+twilight fades, location by city name, commands at sunset and sunrise, and
+the header switch as Locus on/off.
 
-Waiting on Cody: a daytime tint (B8; recommended against, see the plan),
-and which heavier features, if any, to build behind toggles (phase C):
-screen effects such as Darkroom, the ambient light sensor, switching off
-during calls, a different strength per monitor, smart bulbs.
+Decided on 2026-11-20: no daytime tint (B8), none of the heavier features
+(screen effects, ambient light sensor, calls, per-monitor, smart bulbs) for
+now, and the header switch became Locus on/off (B11). Next: Cody validates
+that, then go-public resumes at stage 4.
 
 When Locus goes public, point the old fork's README at it.
 

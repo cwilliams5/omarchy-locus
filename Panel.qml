@@ -4,6 +4,7 @@ import qs.Ui
 import qs.Commons
 import qs.Commons as Commons
 import "Registry.js" as Registry
+import "Status.js" as Status
 
 // The bar icon and the night light dropdown. Service.qml does the work. With
 // showIcon off, Indicator.qml is the icon instead, and this takes up no room on
@@ -26,14 +27,14 @@ Panel {
   readonly property int minTemp: serviceReady ? service.minTemp : 500
   readonly property int maxTemp: serviceReady ? service.maxTemp : 5500
   readonly property bool nightOn: serviceReady && service.nightOn
-  readonly property bool switchOn: serviceReady && service.switchOn
+  // Locus on or off: the switch in the header, and right-click on the icon.
+  readonly property bool enabled: serviceReady && service.enabled
   readonly property bool previewing: serviceReady && service.previewing
   readonly property string mode: serviceReady ? service.mode : "sun"
   // The temperature showing now: the bedtime one once bedtime has come.
   readonly property int temperature: serviceReady ? service.activeTemperature : 3000
   readonly property bool bedtimeNow: serviceReady && service.bedtimeNow
   readonly property int shownTemp: serviceReady && service.actualTemp !== null ? service.actualTemp : temperature
-  readonly property real untilMs: serviceReady ? service.plan.until : 0
 
   property bool editingLocation: false
   property real wheelAccumulator: 0
@@ -94,7 +95,7 @@ Panel {
   }
 
   function flipSwitch() {
-    if (serviceReady) service.setSwitch(!switchOn)
+    if (serviceReady) service.setEnabled(!enabled)
   }
 
   // Just the place. Where it came from shows in the buttons beside it.
@@ -113,7 +114,7 @@ Panel {
 
   function cycleMode() {
     if (!serviceReady) return
-    var modes = ["manual", "sun", "custom"]
+    var modes = ["sun", "custom", "always"]
     service.setMode(modes[(modes.indexOf(mode) + 1) % modes.length])
   }
 
@@ -133,13 +134,7 @@ Panel {
   }
 
   function statusText() {
-    if (previewing) return strings.t("status.preview")
-    if (serviceReady && service.pausedNow)
-      return service.frontLabel !== "" ? strings.t("status.paused").arg(service.frontLabel) : strings.t("status.pausedPlain")
-    if (serviceReady && service.movie && switchOn && untilMs) return strings.t("status.movieUntil").arg(clockText(untilMs))
-    if (switchOn && untilMs) return strings.t("status.onUntil").arg(clockText(untilMs))
-    if (!switchOn && untilMs) return strings.t("status.offUntil").arg(clockText(untilMs))
-    return switchOn ? strings.t("status.on") : strings.t("status.off")
+    return Status.line(serviceReady ? service : null, function(key) { return strings.t(key) }, clockText)
   }
 
   Item {
@@ -152,17 +147,16 @@ Panel {
     anchors.fill: parent
     visible: root.showIcon
     bar: root.bar
+    // Without its point while Locus is off, so off looks different from daytime.
     iconComponent: Component {
       ArcIcon {
         stroke: 8
         color: button.foreground
-        pointColor: root.nightOn ? Commons.Color.accent : button.foreground
+        pointColor: !root.enabled ? "transparent" : root.nightOn ? Commons.Color.accent : button.foreground
       }
     }
     dimmed: !root.nightOn
-    tooltipText: root.serviceReady && root.service.pausedNow
-      ? strings.t("tooltip.paused").arg(root.service.frontLabel)
-      : root.nightOn ? strings.t("tooltip.on").arg(root.shownTemp) : strings.t("tooltip.off")
+    tooltipText: Status.tooltip(root.serviceReady ? root.service : null, function(key) { return strings.t(key) }, root.clockText, root.shownTemp)
     onPressed: function(pressedButton) {
       if (pressedButton === Qt.RightButton) root.flipSwitch()
       else root.toggle()
@@ -233,12 +227,12 @@ Panel {
               size: Style.font.display
               stroke: 7
               color: root.bar.foreground
-              pointColor: root.nightOn ? Commons.Color.accent : root.bar.foreground
+              pointColor: !root.enabled ? "transparent" : root.nightOn ? Commons.Color.accent : root.bar.foreground
             }
           }
           trailingControl: Component {
             ToggleSwitch {
-              checked: root.switchOn
+              checked: root.enabled
               foreground: root.bar.foreground
               onToggled: root.flipSwitch()
             }
@@ -251,6 +245,7 @@ Panel {
           spacing: Style.space(8)
 
           Button {
+            visible: root.enabled
             text: strings.t("hold.off")
             tooltipText: strings.t("hold.offTip")
             bordered: true
@@ -290,8 +285,8 @@ Panel {
 
           Button {
             visible: root.serviceReady && root.service.holding
-            text: strings.t("hold.resume")
-            tooltipText: strings.t("hold.resumeTip")
+            text: root.enabled ? strings.t("hold.resume") : strings.t("hold.end")
+            tooltipText: root.enabled ? strings.t("hold.resumeTip") : strings.t("hold.endTip")
             bordered: true
             selected: true
             foreground: root.bar.foreground
@@ -515,9 +510,9 @@ Panel {
             foreground: root.bar.foreground
             fontFamily: root.bar.fontFamily
             options: [
-              { value: "manual", label: strings.t("mode.manual") },
               { value: "sun", label: strings.t("mode.sun") },
-              { value: "custom", label: strings.t("mode.custom") }
+              { value: "custom", label: strings.t("mode.custom") },
+              { value: "always", label: strings.t("mode.always") }
             ]
             onChanged: function(value) { if (root.serviceReady) root.service.setMode(value) }
           }
@@ -570,7 +565,7 @@ Panel {
           }
 
           SwitchRow {
-            visible: root.mode !== "manual"
+            visible: root.mode !== "always"
             label: strings.t("ramp")
             checked: root.serviceReady && root.service.ramp
             onToggled: if (root.serviceReady) root.service.setRamp(!root.service.ramp)
@@ -585,7 +580,7 @@ Panel {
 
           // With twilight, the lengths follow the sun and only show tonight's.
           StepRow {
-            visible: root.mode !== "manual" && root.serviceReady && root.service.ramp
+            visible: root.mode !== "always" && root.serviceReady && root.service.ramp
             readonly property bool dusk: root.serviceReady && root.service.followsTwilight
             adjustable: !dusk
             label: dusk ? strings.t("fade.inDusk") : strings.t("fade.in")
@@ -594,7 +589,7 @@ Panel {
           }
 
           StepRow {
-            visible: root.mode !== "manual" && root.serviceReady && root.service.ramp
+            visible: root.mode !== "always" && root.serviceReady && root.service.ramp
             readonly property bool dawn: root.serviceReady && root.service.followsTwilight
             adjustable: !dawn
             label: dawn ? strings.t("fade.outDawn") : strings.t("fade.out")
@@ -712,7 +707,7 @@ Panel {
         }
 
         PanelSeparator {
-          visible: root.mode !== "manual"
+          visible: root.mode !== "always"
           foreground: root.bar.foreground
         }
 
@@ -720,7 +715,7 @@ Panel {
         Column {
           width: parent.width
           spacing: Style.space(10)
-          visible: root.mode !== "manual"
+          visible: root.mode !== "always"
 
           SwitchRow {
             label: strings.t("bedtime.level")

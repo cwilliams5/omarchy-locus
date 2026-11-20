@@ -11,7 +11,8 @@ var MAX_TEMP = 5500
 var OFF_TEMP = 6500 // Reported while off, matching omarchy-toggle-nightlight
 var FRESH_TEMP = 6000 // hyprsunset's default; only ever reported right after it starts
 var DAY_MS = 86400000
-var MODES = ["manual", "sun", "custom"]
+// Sun and Custom follow a schedule; Always is warm whenever Locus is on.
+var MODES = ["sun", "custom", "always"]
 var MINUTE_MS = 60000
 var RAMP_IN_MS = 3600000 // Default warm-up, from the moment the schedule turns on
 var RAMP_OUT_MS = 1800000 // Default clear-down, ending the moment the schedule turns off
@@ -60,7 +61,8 @@ function defaultSettings() {
   return {
     mode: "sun",
     temperature: 3000,
-    manualOn: false,
+    // Locus on or off: the panel's switch. Off does nothing until turned on again.
+    enabled: true,
     onTime: "21:00",
     offTime: "07:00",
     latitude: null,
@@ -102,7 +104,7 @@ var SETTING_KEYS = ["mode", "temperature", "onTime", "offTime", "ramp", "fadeIn"
                     "sunsetOffset", "pauseFullscreen", "pauseApps", "autoLocation",
                     "bedtime", "bedtimeAt", "bedtimeTemperature", "weekendDelay",
                     "dim", "dimFrom", "dimPercent", "twilight", "onCommand", "offCommand"]
-var STATE_KEYS = ["manualOn", "override", "rampSkipUntil", "latitude", "longitude", "placeName", "detected"]
+var STATE_KEYS = ["enabled", "override", "rampSkipUntil", "latitude", "longitude", "placeName", "detected"]
 
 function pickKeys(object, keys) {
   var out = {}
@@ -128,10 +130,29 @@ function combineSettings(settingsRaw, stateRaw) {
   var migrate = Object.keys(stray).length > 0
   for (var key in stray)
     if (!Object.prototype.hasOwnProperty.call(state, key)) state[key] = stray[key]
+  // Before Locus had its own on/off switch, Manual mode's switch (manualOn)
+  // said whether the screen was warm. Manual becomes Always, and Locus is on
+  // only if that switch was; in Sun and Custom modes it's on.
+  var oldSwitch = legacyValue(stateRaw, settingsRaw, "manualOn")
+  if (oldSwitch !== undefined) migrate = true
+  if (chosen.mode === "manual") {
+    chosen.mode = "always"
+    migrate = true
+    if (!Object.prototype.hasOwnProperty.call(state, "enabled")) state.enabled = oldSwitch === true
+  }
   var merged = {}
   for (var s in state) merged[s] = state[s]
   for (var c in chosen) merged[c] = chosen[c]
   return { settings: normalizeSettings(merged), migrate: migrate }
+}
+
+function legacyValue(first, second, key) {
+  var objects = [first, second]
+  for (var i = 0; i < objects.length; i++) {
+    var object = objects[i]
+    if (object && typeof object === "object" && Object.prototype.hasOwnProperty.call(object, key)) return object[key]
+  }
+  return undefined
 }
 
 function clampInt(value, low, high) {
@@ -248,9 +269,10 @@ function cleanCommand(value) {
 function normalizeSettings(raw) {
   var result = defaultSettings()
   if (!raw || typeof raw !== "object") return result
-  if (MODES.indexOf(raw.mode) !== -1) result.mode = raw.mode
+  var mode = raw.mode === "manual" ? "always" : raw.mode
+  if (MODES.indexOf(mode) !== -1) result.mode = mode
   if (Number.isFinite(raw.temperature)) result.temperature = clampTemp(raw.temperature)
-  if (typeof raw.manualOn === "boolean") result.manualOn = raw.manualOn
+  if (typeof raw.enabled === "boolean") result.enabled = raw.enabled
   if (parseTime(raw.onTime) !== null) result.onTime = formatTime(parseTime(raw.onTime))
   if (parseTime(raw.offTime) !== null) result.offTime = formatTime(parseTime(raw.offTime))
   if (isLatitude(raw.latitude) && isLongitude(raw.longitude)) {
@@ -502,7 +524,7 @@ function fadeOutMs(settings, location, nightEnd) {
 
 // The fades of the night under way, or of the next one, for the panel.
 function fadeLengths(settings, location, nowMs) {
-  if (followsSwitch(settings, location)) return { inMs: settings.fadeIn * MINUTE_MS, outMs: settings.fadeOut * MINUTE_MS }
+  if (noSchedule(settings, location)) return { inMs: settings.fadeIn * MINUTE_MS, outMs: settings.fadeOut * MINUTE_MS }
   var schedule = scheduleAt(settings, location, nowMs)
   var start = schedule.on ? scheduleStart(settings, location, nowMs) : schedule.next
   var end = schedule.on ? schedule.next : scheduleAt(settings, location, schedule.next).next
@@ -560,18 +582,21 @@ function scheduleStart(settings, location, nowMs) {
   return localAt(nowMs, minute >= onMinutes ? 0 : -1, onMinutes)
 }
 
-// Sun mode with nowhere to take the sun from has no schedule, so the switch rules.
-function followsSwitch(settings, location) {
-  return settings.mode === "manual" || (settings.mode === "sun" && !location)
+// Always mode has no schedule, and nor does Sun mode with nowhere to take the
+// sun from: either is warm whenever Locus is on.
+function noSchedule(settings, location) {
+  return settings.mode === "always" || (settings.mode === "sun" && !location)
 }
 
-// What the screen should be doing now. `until` is 0 when nothing will change it.
-// A hold comes first, in every mode: a timed one ("off for an hour") applies in
-// Manual mode too. Flipping the main switch clears it.
+// Whether the screen should be warm now, and until when (0: nothing will
+// change it). A hold comes first, even while Locus is off ("warm for an hour"
+// then back to off). Then Locus off is off, Always is warm, and Sun and
+// Custom follow their schedule. Turning Locus on or off clears any hold.
 function desiredState(settings, location, nowMs) {
   var override = settings.override
   if (override && nowMs < override.until) return { on: override.on, until: override.until }
-  if (followsSwitch(settings, location)) return { on: settings.manualOn, until: 0 }
+  if (!settings.enabled) return { on: false, until: 0 }
+  if (noSchedule(settings, location)) return { on: true, until: 0 }
   var schedule = scheduleAt(settings, location, nowMs)
   return { on: schedule.on, until: schedule.next }
 }
@@ -615,7 +640,7 @@ function movieKelvin(settings, nowMs) {
 // its start and end, and the evening it belongs to, for placing clock times
 // like bedtime in it. Null otherwise, and in Manual mode.
 function nightAt(settings, location, nowMs) {
-  if (followsSwitch(settings, location)) return null
+  if (!settings.enabled || noSchedule(settings, location)) return null
   if (!desiredState(settings, location, nowMs).on) return null
   var schedule = scheduleAt(settings, location, nowMs)
   if (!schedule.on) return null
@@ -740,7 +765,7 @@ function kelvinAt(settings, location, nowMs, paused) {
 // falls. The two can overlap on a short night; the one nearer the daytime value
 // wins. Null outside a fade.
 function rampAt(settings, location, nowMs) {
-  if (!settings.ramp || followsSwitch(settings, location)) return null
+  if (!settings.ramp || noSchedule(settings, location)) return null
   if (settings.override && nowMs < settings.override.until) return null
   if (!desiredState(settings, location, nowMs).on) return null
   var ramp = null
@@ -769,7 +794,7 @@ function rampAt(settings, location, nowMs) {
 function holdEndPatch(override, settings, location) {
   var patch = { override: null }
   if (!override || !override.on) return patch
-  var scheduled = settings && location !== undefined && !followsSwitch(settings, location)
+  var scheduled = settings && location !== undefined && !noSchedule(settings, location)
   if (scheduled && !scheduleAt(settings, location, override.until).on) return patch
   var warmUp = settings && Number.isFinite(settings.fadeIn) ? settings.fadeIn * MINUTE_MS : RAMP_IN_MS
   if (scheduled) warmUp = fadeInMs(settings, location, scheduleStart(settings, location, override.until))
@@ -833,7 +858,7 @@ function nextClock(nowMs, minute) {
 // when nothing is due.
 function nextDueAt(settings, location, nowMs, profileMinutes) {
   var due = []
-  if (!followsSwitch(settings, location)) {
+  if (settings.enabled && !noSchedule(settings, location)) {
     var schedule = scheduleAt(settings, location, nowMs)
     due.push(schedule.next)
     if (schedule.on && settings.ramp) {
@@ -927,9 +952,9 @@ function isProfileValue(reading, values) {
 }
 
 // Whether the schedule alone (no holds, no pausing) says on, or null when there
-// is no schedule (Manual mode, or Sun mode with no location).
+// is none: Locus off, Always mode, or Sun mode with no location.
 function scheduleOn(settings, location, nowMs) {
-  if (followsSwitch(settings, location)) return null
+  if (!settings.enabled || noSchedule(settings, location)) return null
   return scheduleAt(settings, location, nowMs).on
 }
 
@@ -941,20 +966,43 @@ function scheduleCommand(settings, previous, current) {
   return current ? settings.onCommand : settings.offCommand
 }
 
-// The main switch. With a schedule, flipping away from it holds until the next
-// scheduled change, and flipping back simply follows the schedule again.
-function switchPatch(settings, location, nowMs, turnOn) {
-  if (followsSwitch(settings, location)) return { manualOn: turnOn, override: null }
-  var schedule = scheduleAt(settings, location, nowMs)
-  if (turnOn === schedule.on) return { override: null }
-  return { override: { on: turnOn, until: schedule.next } }
+// Locus on or off (the panel's switch, right-click on the icon). Either way
+// any hold ends: on follows the mode again, off stays off until turned on.
+function enablePatch(on) {
+  return { enabled: on === true, override: null }
+}
+
+// The next moment the screen will actually warm or clear by itself, or 0 when
+// nothing will change it: the end of a hold only if the screen changes then
+// (an "off till morning" hold ends in daylight, so the next change is sunset).
+function nextChange(settings, location, nowMs) {
+  var state = desiredState(settings, location, nowMs)
+  var at = state.until
+  for (var i = 0; i < 4 && at > nowMs; i++) {
+    var then = desiredState(settings, location, at)
+    if (then.on !== state.on) return at
+    if (!(then.until > at)) return 0
+    at = then.until
+  }
+  return 0
+}
+
+// What the panel's status line and the icon's tooltip say: Movie mode and its
+// end; warm until the next change (or just warm); off with when it warms
+// next; or plain off, when nothing will turn it on.
+function statusAt(settings, location, nowMs) {
+  if (movieKelvin(settings, nowMs) !== null) return { kind: "movieUntil", at: settings.override.until }
+  var on = desiredState(settings, location, nowMs).on
+  var at = nextChange(settings, location, nowMs)
+  if (on) return { kind: at ? "warmUntil" : "warm", at: at }
+  return { kind: at ? "warmsAt" : "off", at: at }
 }
 
 // A hold chosen from the panel or the command line: "off" or "on" for a number
 // of minutes (1 to 12 hours), "movie" (milder, MOVIE_TEMP, for MOVIE_MINUTES
 // unless given a length), "morning" (off until the night ends; in the day, that
 // skips tonight), or "clear" (back to the schedule). Null when it doesn't apply:
-// "morning" needs a schedule, and an unknown kind or length.
+// "morning" needs a schedule (and Locus on), and an unknown kind or length.
 function holdPatch(settings, location, nowMs, kind, minutes) {
   if (kind === "clear") return { override: null }
   if (kind === "movie") {
@@ -962,7 +1010,7 @@ function holdPatch(settings, location, nowMs, kind, minutes) {
     return { override: { on: true, until: nowMs + movieMinutes * MINUTE_MS, temperature: MOVIE_TEMP } }
   }
   if (kind === "morning") {
-    if (followsSwitch(settings, location)) return null
+    if (!settings.enabled || noSchedule(settings, location)) return null
     var schedule = scheduleAt(settings, location, nowMs)
     var end = schedule.on ? schedule.next : scheduleAt(settings, location, schedule.next).next
     return { override: { on: false, until: end } }
@@ -1050,9 +1098,9 @@ function daySamples(settings, location, fromMs, stepMs, count) {
   return out
 }
 
-function modePatch(settings, mode, currentlyOn) {
-  if (mode === "manual") return { mode: mode, manualOn: currentlyOn, override: null, rampSkipUntil: 0 }
-  return { mode: mode, override: null, rampSkipUntil: 0 }
+// Changing the mode ends any hold. "manual" is the old name for Always.
+function modePatch(settings, mode) {
+  return { mode: mode === "manual" ? "always" : mode, override: null, rampSkipUntil: 0 }
 }
 
 if (typeof module !== "undefined") {
@@ -1116,7 +1164,9 @@ if (typeof module !== "undefined") {
     mixKelvin: mixKelvin,
     kelvinAt: kelvinAt,
     holdEndPatch: holdEndPatch,
-    switchPatch: switchPatch,
+    enablePatch: enablePatch,
+    nextChange: nextChange,
+    statusAt: statusAt,
     modePatch: modePatch,
     holdPatch: holdPatch,
     scheduleOn: scheduleOn,

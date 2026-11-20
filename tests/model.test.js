@@ -46,48 +46,38 @@ test("matching custom hours never turn on", () => {
   assert.strictEqual(Model.scheduleAt(s, place, now).on, false)
 })
 
-test("main switch during a schedule holds until the next change", () => {
-  const now = at(2026, 11, 5, 22)
+test("Locus off stays off, whatever the schedule, until it's turned on", () => {
   const s = settings({ mode: "custom", onTime: "21:00", offTime: "07:00" })
-  const offPatch = Model.switchPatch(s, place, now, false)
-  assert.deepStrictEqual(offPatch.override, { on: false, until: at(2026, 11, 6, 7) })
-
-  const held = settings(Object.assign({}, s, offPatch))
-  assert.deepStrictEqual(Model.desiredState(held, place, now), { on: false, until: at(2026, 11, 6, 7) })
-
-  // Flipping back returns to following the schedule.
-  const backPatch = Model.switchPatch(held, place, now, true)
-  assert.strictEqual(backPatch.override, null)
-
-  // Once the hold ends, the schedule leads again, and it says off at 7:00.
-  assert.strictEqual(Model.desiredState(held, place, at(2026, 11, 6, 7)).on, false)
-  assert.strictEqual(Model.desiredState(held, place, at(2026, 11, 6, 21)).on, true)
+  const off = settings(Object.assign({}, s, Model.enablePatch(false)))
+  for (const hour of [12, 21, 23, 3, 9]) assert.deepStrictEqual(Model.desiredState(off, place, at(2026, 11, hour < 12 ? 6 : 5, hour)), { on: false, until: 0 })
+  assert.strictEqual(Model.nextDueAt(off, place, at(2026, 11, 5, 20), []), null, "nothing to wake for")
+  // On again, it follows the schedule at once: warm at night, clear by day.
+  const on = settings(Object.assign({}, off, Model.enablePatch(true)))
+  assert.deepStrictEqual(Model.desiredState(on, place, at(2026, 11, 5, 22)), { on: true, until: at(2026, 11, 6, 7) })
+  assert.deepStrictEqual(Model.desiredState(on, place, at(2026, 11, 5, 12)), { on: false, until: at(2026, 11, 5, 21) })
 })
 
-test("turning on during the off hours holds until they end", () => {
-  const now = at(2026, 11, 5, 10)
-  const s = settings({ mode: "custom", onTime: "21:00", offTime: "07:00" })
-  const patch = Model.switchPatch(s, place, now, true)
-  assert.deepStrictEqual(patch.override, { on: true, until: at(2026, 11, 5, 21) })
-  const held = settings(Object.assign({}, s, patch))
-  // At 21:00 the hold ends and the schedule keeps it on, with no gap.
-  assert.strictEqual(Model.desiredState(held, place, at(2026, 11, 5, 20, 59)).on, true)
-  assert.strictEqual(Model.desiredState(held, place, at(2026, 11, 5, 21)).on, true)
+test("turning Locus on or off ends any hold", () => {
+  const s = settings({ mode: "custom", override: { on: false, until: at(2030, 1, 1) } })
+  assert.deepStrictEqual(Model.enablePatch(true), { enabled: true, override: null })
+  assert.deepStrictEqual(Model.enablePatch(false), { enabled: false, override: null })
+  assert.strictEqual(settings(Object.assign({}, s, Model.enablePatch(true))).override, null)
 })
 
-test("manual mode has no end time and keeps the current state", () => {
+test("Always mode is warm whenever Locus is on", () => {
   const s = settings({ mode: "sun" })
-  const patch = Model.modePatch(s, "manual", true)
-  const manual = settings(Object.assign({}, s, patch))
-  assert.deepStrictEqual(Model.desiredState(manual, place, at(2026, 11, 5, 12)), { on: true, until: 0 })
-  const off = settings(Object.assign({}, manual, Model.switchPatch(manual, place, at(2026, 11, 5, 12), false)))
+  const always = settings(Object.assign({}, s, Model.modePatch(s, "always")))
+  assert.deepStrictEqual(Model.desiredState(always, place, at(2026, 11, 5, 12)), { on: true, until: 0 })
+  const off = settings(Object.assign({}, always, Model.enablePatch(false)))
   assert.deepStrictEqual(Model.desiredState(off, place, at(2026, 11, 5, 12)), { on: false, until: 0 })
 })
 
-test("changing modes drops any hold", () => {
+test("changing modes drops any hold, and Manual is the old name for Always", () => {
   const s = settings({ mode: "sun", override: { on: true, until: at(2030, 1, 1) } })
-  assert.strictEqual(Model.modePatch(s, "custom", true).override, null)
-  assert.strictEqual(Model.modePatch(s, "manual", true).override, null)
+  assert.strictEqual(Model.modePatch(s, "custom").override, null)
+  assert.strictEqual(Model.modePatch(s, "manual").mode, "always")
+  assert.strictEqual(settings({ mode: "manual" }).mode, "always")
+  assert.strictEqual(settings({ mode: "sideways" }).mode, "sun")
 })
 
 test("bad settings fall back field by field", () => {
@@ -161,13 +151,10 @@ test("location prefers your own, then weather, then time zone", () => {
   assert.strictEqual(Model.resolveLocation(settings({}), null, null), null)
 })
 
-test("sun mode with no location follows the switch", () => {
-  const now = at(2026, 11, 5, 22)
-  const s = settings({ mode: "sun" })
-  assert.deepStrictEqual(Model.desiredState(s, null, now), { on: false, until: 0 })
-  const patch = Model.switchPatch(s, null, now, true)
-  assert.deepStrictEqual(patch, { manualOn: true, override: null })
-  assert.deepStrictEqual(Model.desiredState(settings(Object.assign({}, s, patch)), null, now), { on: true, until: 0 })
+test("sun mode with no location is warm whenever Locus is on", () => {
+  const now = at(2026, 11, 5, 12)
+  assert.deepStrictEqual(Model.desiredState(settings({ mode: "sun" }), null, now), { on: true, until: 0 })
+  assert.deepStrictEqual(Model.desiredState(settings({ mode: "sun", enabled: false }), null, now), { on: false, until: 0 })
 })
 
 test("custom hours don't need a location", () => {
@@ -239,16 +226,16 @@ test("turning the ramp off goes straight to the temperature", () => {
   assert.strictEqual(Model.kelvinAt(s, place, at(2026, 11, 6, 7, 0)), Model.OFF_TEMP)
 })
 
-test("holds and manual mode ignore the ramp", () => {
+test("holds and Always mode ignore the ramp", () => {
   const now = at(2026, 11, 5, 10)
   const s = settings({ mode: "custom", onTime: "21:00", offTime: "07:00", temperature: 2000 })
-  const on = settings(Object.assign({}, s, Model.switchPatch(s, place, now, true)))
+  const on = settings(Object.assign({}, s, Model.holdPatch(s, place, now, "on", 60)))
   assert.strictEqual(Model.kelvinAt(on, place, now), 2000)
   const night = at(2026, 11, 5, 21, 30)
-  const off = settings(Object.assign({}, s, Model.switchPatch(s, place, night, false)))
+  const off = settings(Object.assign({}, s, Model.holdPatch(s, place, night, "off", 60)))
   assert.strictEqual(Model.kelvinAt(off, place, night), Model.OFF_TEMP)
-  const manual = settings({ mode: "manual", manualOn: true, temperature: 2000 })
-  assert.strictEqual(Model.kelvinAt(manual, place, night), 2000)
+  const always = settings({ mode: "always", temperature: 2000 })
+  assert.strictEqual(Model.kelvinAt(always, place, night), 2000)
 })
 
 test("a hold ending at the schedule's start stays warm with no restart", () => {
@@ -359,14 +346,15 @@ test("off until morning: the rest of tonight, or all of tonight from the day", (
   assert.strictEqual(Model.holdPatch(sun, null, at(2026, 11, 5, 23), "morning"), null, "and a location in Sun mode")
 })
 
-test("timed holds work in Manual mode, and the switch clears them", () => {
-  const manual = settings({ mode: "manual", manualOn: false, temperature: 2000 })
+test("a warm hold works while Locus is off, then it's off again; the switch ends it", () => {
+  const off = settings({ mode: "sun", enabled: false, temperature: 2000 })
   const now = at(2026, 11, 5, 14)
-  const held = settings(Object.assign({}, manual, Model.holdPatch(manual, place, now, "on", 30)))
+  const held = settings(Object.assign({}, off, Model.holdPatch(off, place, now, "on", 30)))
   assert.deepStrictEqual(Model.desiredState(held, place, now), { on: true, until: now + 30 * MIN })
+  assert.strictEqual(Model.kelvinAt(held, place, now + MIN), 2000)
   assert.deepStrictEqual(Model.desiredState(held, place, now + 31 * MIN), { on: false, until: 0 })
-  const flipped = settings(Object.assign({}, held, Model.switchPatch(held, place, now, false)))
-  assert.strictEqual(flipped.override, null)
+  assert.strictEqual(settings(Object.assign({}, held, Model.enablePatch(false))).override, null)
+  assert.strictEqual(Model.holdPatch(off, place, at(2026, 11, 5, 23), "morning"), null, "off till morning means nothing while off")
 })
 
 test("a hold is cleared, and bad requests change nothing", () => {
@@ -418,12 +406,12 @@ test("Movie mode is milder for two and a half hours, then the schedule again", (
   assert.strictEqual(Model.kelvinAt(held, place, now + MIN, true), Model.OFF_TEMP, "a paused app still wins")
 })
 
-test("Movie mode works in the day and in Manual mode, and takes a length", () => {
+test("Movie mode works in the day and while Locus is off, and takes a length", () => {
   const noon = at(2026, 11, 5, 12)
   const day = settings({ mode: "sun", temperature: 2000 })
   const held = settings(Object.assign({}, day, Model.holdPatch(day, place, noon, "movie")))
   assert.strictEqual(Model.kelvinAt(held, place, noon + MIN), 5000)
-  const manual = settings({ mode: "manual", manualOn: false })
+  const manual = settings({ mode: "sun", enabled: false })
   const film = settings(Object.assign({}, manual, Model.holdPatch(manual, place, noon, "movie", 100)))
   assert.deepStrictEqual(Model.desiredState(film, place, noon + 99 * MIN), { on: true, until: noon + 100 * MIN })
   assert.strictEqual(Model.kelvinAt(film, place, noon + 101 * MIN), Model.OFF_TEMP)
@@ -469,8 +457,8 @@ test("a warm hold ending in the day leaves that evening's warm-up alone", () => 
   // Ending at night still skips the warm-up, as before.
   const night = settings(Object.assign({}, s, Model.holdPatch(s, place, at(2026, 11, 5, 20), "movie")))
   assert.strictEqual(Model.holdEndPatch(night.override, night, place).rampSkipUntil, at(2026, 11, 5, 22, 30) + 60 * MIN)
-  // Manual mode has no warm-up to protect either way.
-  const manual = settings({ mode: "manual" })
+  // With Locus off there's no warm-up to protect either way.
+  const manual = settings({ mode: "custom", onTime: "21:00", offTime: "07:00", enabled: false })
   assert.strictEqual(Model.kelvinAt(settings(Object.assign({}, manual, Model.holdEndPatch({ on: true, until: at(2026, 11, 5, 20) }, manual, place))), place, at(2026, 11, 5, 21)), Model.OFF_TEMP)
 })
 
@@ -499,7 +487,7 @@ test("every setting has exactly one home", () => {
 const populated = () => settings({
   mode: "custom", temperature: 2700, onTime: "20:30", offTime: "06:45", ramp: true, fadeIn: 45, fadeOut: 20,
   sunsetOffset: 30, pauseFullscreen: true, pauseApps: ["gimp", "steam_app_*"], autoLocation: true,
-  manualOn: true, override: { on: false, until: at(2026, 11, 6, 7) }, rampSkipUntil: at(2026, 11, 5, 22),
+  enabled: false, override: { on: false, until: at(2026, 11, 6, 7) }, rampSkipUntil: at(2026, 11, 5, 22),
   latitude: 47.6, longitude: -122.3, detected: { latitude: 47.61, longitude: -122.33, name: "Somewhere" }
 })
 
@@ -516,16 +504,16 @@ test("settings and state split and combine without loss", () => {
 
 test("coordinates and holds stay in the private state file", () => {
   const parts = Model.splitSettings(populated())
-  for (const key of ["latitude", "longitude", "detected", "override", "manualOn", "rampSkipUntil"]) {
+  for (const key of ["latitude", "longitude", "detected", "override", "enabled", "rampSkipUntil"]) {
     assert.ok(key in parts.state, key + " in state")
     assert.ok(!(key in parts.settings), key + " kept out of the tracked file")
   }
   assert.ok(!JSON.stringify(parts.settings).includes("47.6"), "no coordinates in the tracked file")
 })
 
-test("a hold or the manual switch changes only the state file", () => {
+test("a hold or the on/off switch changes only the state file", () => {
   const before = populated()
-  const held = settings(Object.assign({}, before, { override: { on: true, until: at(2026, 11, 7, 7) }, manualOn: false }))
+  const held = settings(Object.assign({}, before, { override: { on: true, until: at(2026, 11, 7, 7) }, enabled: true }))
   assert.deepStrictEqual(Model.splitSettings(held).settings, Model.splitSettings(before).settings)
   assert.notDeepStrictEqual(Model.splitSettings(held).state, Model.splitSettings(before).state)
 })
@@ -720,7 +708,7 @@ test("paused means neutral, whatever the schedule, a hold or manual mode says", 
   assert.strictEqual(Model.kelvinAt(custom, place, night, true), Model.OFF_TEMP)
   const held = settings(Object.assign({}, custom, { override: { on: true, until: night + 60 * MIN } }))
   assert.strictEqual(Model.kelvinAt(held, place, night, true), Model.OFF_TEMP)
-  const manual = settings({ mode: "manual", manualOn: true, temperature: 2000 })
+  const manual = settings({ mode: "always", temperature: 2000 })
   assert.strictEqual(Model.kelvinAt(manual, place, night, true), Model.OFF_TEMP)
   // Pausing changes nothing that's saved: the schedule is the same once the app goes.
   assert.deepStrictEqual(Model.desiredState(custom, place, night), { on: true, until: at(2026, 11, 6, 7) })
@@ -877,12 +865,12 @@ test("the next check comes when something is due", () => {
   assert.strictEqual(Model.nextDueAt(held, place, at(2026, 11, 5, 20), []), at(2026, 11, 5, 20, 15), "a hold ending")
   const during = at(2026, 11, 5, 21, 10)
   assert.strictEqual(Model.nextDueAt(s, place, during, []), during + Model.fadeStepMs(s, place, during), "the next fade step")
-  assert.strictEqual(Model.nextDueAt(settings({ mode: "manual", manualOn: true }), place, during, []), null, "manual mode has nothing due")
+  assert.strictEqual(Model.nextDueAt(settings({ mode: "always" }), place, during, []), null, "Always mode has nothing due")
   assert.strictEqual(Model.nextDueAt(settings({ mode: "sun" }), null, during, []), null, "nor does Sun mode with no location")
 })
 
 test("checks follow hyprsunset.conf's own switch times, and one just after", () => {
-  const manual = settings({ mode: "manual", manualOn: true })
+  const manual = settings({ mode: "always" })
   assert.strictEqual(Model.nextDueAt(manual, place, at(2026, 11, 6, 6, 59), [420]), at(2026, 11, 6, 7) + 2000)
   // hyprsunset can switch up to a minute late, so there's a second look.
   assert.strictEqual(Model.nextDueAt(manual, place, at(2026, 11, 6, 7) + 3000, [420]), at(2026, 11, 6, 7) + 62000)
@@ -898,7 +886,7 @@ test("nothing due is ever in the past", () => {
     settings({ mode: "custom", onTime: "09:00", offTime: "17:00", fadeIn: 0, fadeOut: 180 }),
     settings({ mode: "sun", sunsetOffset: 120, fadeIn: 180 }),
     settings({ mode: "sun", sunsetOffset: -60, ramp: false }),
-    settings({ mode: "manual" })
+    settings({ mode: "always" })
   ]
   for (const s of all) {
     for (let minute = 0; minute < 2880; minute += 13) {
@@ -1059,8 +1047,9 @@ test("a bedtime after the night ends is ignored", () => {
 
 test("bedtime needs a schedule and the night light on", () => {
   const night = at(2026, 11, 5, 23, 45)
-  assert.strictEqual(Model.kelvinAt(bedNight({ mode: "manual", manualOn: true }), place, night), 3000, "Manual mode")
-  assert.strictEqual(Model.kelvinAt(bedNight({ mode: "sun", manualOn: true }), null, night), 3000, "Sun mode with no location")
+  assert.strictEqual(Model.kelvinAt(bedNight({ mode: "always" }), place, night), 3000, "Always mode")
+  assert.strictEqual(Model.kelvinAt(bedNight({ mode: "sun" }), null, night), 3000, "Sun mode with no location")
+  assert.strictEqual(Model.kelvinAt(bedNight({ enabled: false }), place, night), Model.OFF_TEMP, "Locus off")
   const s = bedNight()
   const off = settings(Object.assign({}, s, Model.holdPatch(s, place, at(2026, 11, 5, 23), "off", 60)))
   assert.strictEqual(Model.kelvinAt(off, place, night), Model.OFF_TEMP)
@@ -1218,7 +1207,7 @@ test("dimming at once with Gradual off, and from the start when its time has pas
   assert.strictEqual(Model.dimAt(dimNight({ onTime: "18:00", offTime: "23:00" }), place, at(2026, 11, 5, 22)), null, "after the night ends")
 })
 
-test("dimming needs the night light on: not off, paused, in Manual mode or in Movie mode", () => {
+test("dimming needs the night light on: not off, paused, in Always mode or in Movie mode", () => {
   const s = dimNight()
   const deep = at(2026, 11, 6, 2)
   assert.strictEqual(Model.gammaAt(s, place, deep, true), 100, "a paused app gets full brightness")
@@ -1228,7 +1217,8 @@ test("dimming needs the night light on: not off, paused, in Manual mode or in Mo
   assert.strictEqual(Model.gammaAt(warm, place, deep), 80, "a warm hold keeps it")
   const film = settings(Object.assign({}, s, Model.holdPatch(s, place, at(2026, 11, 6, 1), "movie")))
   assert.strictEqual(Model.gammaAt(film, place, deep), 100)
-  assert.strictEqual(Model.gammaAt(dimNight({ mode: "manual", manualOn: true }), place, deep), 100)
+  assert.strictEqual(Model.gammaAt(dimNight({ mode: "always" }), place, deep), 100)
+  assert.strictEqual(Model.gammaAt(dimNight({ enabled: false }), place, deep), 100)
 })
 
 test("a short night eases in and clears down without a jump", () => {
@@ -1441,7 +1431,8 @@ test("a command runs only as the schedule itself turns on or off", () => {
   assert.strictEqual(Model.scheduleCommand(s, true, true), "")
   assert.strictEqual(Model.scheduleCommand(s, null, true), "", "not on the first look after a restart")
   assert.strictEqual(Model.scheduleCommand(s, true, null), "", "nor when the schedule goes away")
-  assert.strictEqual(Model.scheduleOn(settings({ mode: "manual" }), place, at(2026, 11, 5, 22)), null)
+  assert.strictEqual(Model.scheduleOn(settings({ mode: "always" }), place, at(2026, 11, 5, 22)), null)
+  assert.strictEqual(Model.scheduleOn(settings({ mode: "custom", enabled: false }), place, at(2026, 11, 5, 22)), null, "nothing runs while Locus is off")
   assert.strictEqual(Model.scheduleOn(settings({ mode: "sun" }), null, at(2026, 11, 5, 22)), null)
   // Through a day of checks, with a hold and Movie mode in the evening: once each way.
   const held = settings(Object.assign({}, s, Model.holdPatch(s, place, at(2026, 11, 5, 20), "movie")))
@@ -1461,4 +1452,53 @@ test("waking after sunset runs the night's command once; sleeping through the ni
   const before = Model.scheduleOn(s, place, at(2026, 11, 5, 18))
   assert.strictEqual(Model.scheduleCommand(s, before, Model.scheduleOn(s, place, at(2026, 11, 5, 23))), "night")
   assert.strictEqual(Model.scheduleCommand(s, before, Model.scheduleOn(s, place, at(2026, 11, 6, 9))), "")
+})
+
+// ---- Locus on and off, and what the status line says -------------------------------
+
+test("settings from before the on/off switch keep their meaning", () => {
+  // Sun or Custom mode: Locus is on, and the old switch is dropped. A hold stays.
+  const hold = { on: false, until: at(2026, 11, 20, 6, 30) }
+  const sun = Model.combineSettings({ mode: "sun", temperature: 3000 }, { manualOn: false, override: hold })
+  assert.strictEqual(sun.settings.enabled, true)
+  assert.strictEqual(sun.settings.mode, "sun")
+  assert.deepStrictEqual(sun.settings.override, hold)
+  assert.strictEqual(sun.migrate, true, "rewritten once, without manualOn")
+  assert.ok(!("manualOn" in Model.splitSettings(sun.settings).state))
+  // Manual mode becomes Always, on only if its switch was.
+  const manualOff = Model.combineSettings({ mode: "manual" }, { manualOn: false })
+  assert.deepStrictEqual([manualOff.settings.mode, manualOff.settings.enabled, manualOff.migrate], ["always", false, true])
+  const manualOn = Model.combineSettings({ mode: "manual" }, { manualOn: true })
+  assert.deepStrictEqual([manualOn.settings.mode, manualOn.settings.enabled], ["always", true])
+  // The old single file (or Sundown's) holds both.
+  const single = Model.combineSettings({ mode: "manual", manualOn: true, temperature: 2500 }, null)
+  assert.deepStrictEqual([single.settings.mode, single.settings.enabled, single.settings.temperature], ["always", true, 2500])
+  // Once migrated, nothing more to do.
+  const parts = Model.splitSettings(manualOff.settings)
+  assert.strictEqual(Model.combineSettings(parts.settings, parts.state).migrate, false)
+})
+
+test("the status names the next real change, not when a hold expires", () => {
+  const s = settings({ mode: "custom", onTime: "21:00", offTime: "07:00" })
+  assert.deepStrictEqual(Model.statusAt(s, place, at(2026, 11, 5, 15)), { kind: "warmsAt", at: at(2026, 11, 5, 21) })
+  assert.deepStrictEqual(Model.statusAt(s, place, at(2026, 11, 5, 23)), { kind: "warmUntil", at: at(2026, 11, 6, 7) })
+  // Off till morning ends at 07:00, in daylight: the screen next warms at 21:00 the next day.
+  const morning = settings(Object.assign({}, s, Model.holdPatch(s, place, at(2026, 11, 5, 23), "morning")))
+  assert.deepStrictEqual(Model.statusAt(morning, place, at(2026, 11, 5, 23)), { kind: "warmsAt", at: at(2026, 11, 6, 21) })
+  const hour = settings(Object.assign({}, s, Model.holdPatch(s, place, at(2026, 11, 5, 23), "off", 60)))
+  assert.deepStrictEqual(Model.statusAt(hour, place, at(2026, 11, 5, 23)), { kind: "warmsAt", at: at(2026, 11, 6, 0) })
+  // Warm from 20:30 for an hour runs into the schedule: warm until morning.
+  const early = settings(Object.assign({}, s, Model.holdPatch(s, place, at(2026, 11, 5, 20, 30), "on", 60)))
+  assert.deepStrictEqual(Model.statusAt(early, place, at(2026, 11, 5, 20, 30)), { kind: "warmUntil", at: at(2026, 11, 6, 7) })
+  const film = settings(Object.assign({}, s, Model.holdPatch(s, place, at(2026, 11, 5, 22), "movie")))
+  assert.deepStrictEqual(Model.statusAt(film, place, at(2026, 11, 5, 22)), { kind: "movieUntil", at: at(2026, 11, 6, 0, 30) })
+})
+
+test("the status while off, or always warm, has no time", () => {
+  const off = settings({ mode: "custom", onTime: "21:00", offTime: "07:00", enabled: false })
+  assert.deepStrictEqual(Model.statusAt(off, place, at(2026, 11, 5, 23)), { kind: "off", at: 0 })
+  const warm = settings(Object.assign({}, off, Model.holdPatch(off, place, at(2026, 11, 5, 14), "on", 60)))
+  assert.deepStrictEqual(Model.statusAt(warm, place, at(2026, 11, 5, 14)), { kind: "warmUntil", at: at(2026, 11, 5, 15) })
+  assert.deepStrictEqual(Model.statusAt(settings({ mode: "always" }), place, at(2026, 11, 5, 14)), { kind: "warm", at: 0 })
+  assert.deepStrictEqual(Model.statusAt(settings({ mode: "custom", onTime: "09:00", offTime: "09:00" }), place, at(2026, 11, 5, 14)).kind, "off", "hours that never turn on")
 })

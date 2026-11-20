@@ -24,7 +24,8 @@ in the same commit as the work.
 
 - **2026-11-19, end of session 1:** A1, A2, B1 done, merged, pushed, tested
   live; the installed copy is on `main`; dotfiles updated.
-- **2026-11-19, session 2:** phase B done except B8, held for Cody. **Next: Cody's calls on B8 and phase C, then D1 (go-public stage 4).**
+- **2026-11-19/20, session 2:** phase B done (B8 skipped), plus B11, the
+  on/off switch. **Next: Cody validates B11, then D1 (go-public stage 4).**
 - Cody's live Locus state at that point: Sun mode, 3000K, and a hold "off
   until morning" (ends at sunrise, 6:30 AM on 2026-11-20). If a test changes
   the hold at night, put it back with
@@ -70,11 +71,12 @@ Phase B, features that cost nothing to run:
 - [x] B5. The Arc mark as the bar icon (tested live: bar off and on, the panel header; the vertical bar not tried, the icon is centred by Omarchy's own bounds code)
 - [x] B6. A 24-hour view of the night in the panel (tested live: with bedtime and dimming, and with a hold)
 - [x] B7. Fades that follow twilight (option) (4578241, tested live: the lengths for Los Angeles tonight, 27 min each, and the panel rows)
-- [ ] B8. Daytime tint (off by default): **held for Cody** (see "Decisions waiting on Cody")
+- [-] B8. Daytime tint: **skipped** (Cody, 2026-11-20; see "Decisions")
 - [x] B9. Location by city name (74f87f4, tested live: Berlin found and shown, a miss, a typo, back to automatic)
+- [x] B11. The header switch turns Locus on or off, Omarchy-style (Cody's call, 2026-11-20; tested live: migration of his files, off, a warm hold while off, on at night, "manual" as Always, the status line, the icon without its point)
 - [x] B10. Run a command at sunset and sunrise (tested live: runcommand, and a real on and off edge, each run once, on the minute, under a hold)
 
-Phase C, heavier, each behind a toggle, only if Cody wants them:
+Phase C, heavier, each behind a toggle: **none wanted for now** (Cody, 2026-11-20):
 
 - [ ] C1. Screen effects (Darkroom red)
 - [ ] C2. Ambient light sensor
@@ -133,7 +135,8 @@ Gotchas met so far:
 - **`Model.js`** (pure, tested): `defaultSettings`, `normalizeSettings`
   (validate every new key here), `SETTING_KEYS` / `STATE_KEYS` (every new key
   needs a home; a test enforces it), `scheduleAt` / `scheduleStart` /
-  `sunOn`, `desiredState` (holds first, then Manual, then the schedule),
+  `sunOn`, `desiredState` (holds first, then Locus off, then Always or the
+  schedule), `statusAt` / `nextChange` (the status line),
   `kelvinAt` (the screen's temperature now) and `rampAt` (the fade in
   progress), `nextDueAt` (**every new timed change must appear here**),
   `fadeStepMs`, `isVisibleStep`, `isBigJump`, `holdPatch`, `switchPatch`,
@@ -371,7 +374,27 @@ dark theme at night. Credit f.lux (dark mode at sunset) and Redshift's hooks.
   screen; this needs shaders or a helper program. Probably skip.
 - **C5. Smart bulbs:** network calls; skip unless Cody has them.
 
-## Decisions waiting on Cody
+## Decisions
+
+**2026-11-20, Cody:** skip B8 (daytime tint) and all of phase C for now;
+the bar icon's point keeps the theme's accent (not the brand amber); and
+the header switch becomes Locus on/off (B11, below), with right-click on the
+icon doing the same and the hold buttons unchanged.
+
+### B11. Locus on/off (why the switch changed)
+
+Cody turned the switch off at night and the status said "Off until 6:30 AM":
+the switch meant "warm now" and held until the next scheduled change, so
+there was no plain "off until I say", short of Manual mode. Options weighed:
+an "off indefinitely" hold button; Windows' model (a "now" switch plus a
+separate schedule switch); or Omarchy's model, where a panel's header
+switch turns the thing on or off. Chosen: Omarchy's. `enabled` (state file)
+is Locus on/off; off does nothing until turned on (a warm hold or Movie
+mode still works, then it's off again); Manual mode became Always (warm
+whenever on); the status line names the next real change (`statusAt`). Old
+files migrate once in `combineSettings`.
+
+### Earlier decisions (kept for the record)
 
 - ~~B2 preset temperatures and Movie mode's temperature.~~ **Settled
   2026-11-19:** Cody let the proposed defaults stand (Candle 1900K, Warm 2700K,
