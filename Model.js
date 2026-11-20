@@ -86,7 +86,10 @@ function defaultSettings() {
     dimFrom: "23:30",
     dimPercent: 80,
     // Sun mode's fades follow twilight instead of fadeIn and fadeOut.
-    twilight: false
+    twilight: false,
+    // Shell commands run as the schedule turns on and off (a dark theme at night).
+    onCommand: "",
+    offCommand: ""
   }
 }
 
@@ -98,7 +101,7 @@ function defaultSettings() {
 var SETTING_KEYS = ["mode", "temperature", "onTime", "offTime", "ramp", "fadeIn", "fadeOut",
                     "sunsetOffset", "pauseFullscreen", "pauseApps", "autoLocation",
                     "bedtime", "bedtimeAt", "bedtimeTemperature", "weekendDelay",
-                    "dim", "dimFrom", "dimPercent", "twilight"]
+                    "dim", "dimFrom", "dimPercent", "twilight", "onCommand", "offCommand"]
 var STATE_KEYS = ["manualOn", "override", "rampSkipUntil", "latitude", "longitude", "placeName", "detected"]
 
 function pickKeys(object, keys) {
@@ -232,6 +235,15 @@ function extraWarmStep(kelvin) {
   return Math.max(1, Math.round(share * EXTRA_STEPS))
 }
 
+// A command to run, as typed: trimmed, bounded, and without the NUL that no
+// process argument can hold. Only the user can set it (their own settings
+// file, or the command line), so it runs as written.
+var COMMAND_MAX = 2000
+function cleanCommand(value) {
+  if (typeof value !== "string") return ""
+  return value.replace(/\u0000/g, "").trim().slice(0, COMMAND_MAX)
+}
+
 // Bad or missing values fall back to the defaults, one field at a time.
 function normalizeSettings(raw) {
   var result = defaultSettings()
@@ -276,6 +288,8 @@ function normalizeSettings(raw) {
   if (parseTime(raw.dimFrom) !== null) result.dimFrom = formatTime(parseTime(raw.dimFrom))
   if (Number.isFinite(raw.dimPercent)) result.dimPercent = clampInt(raw.dimPercent, MIN_DIM_PERCENT, FULL_GAMMA)
   if (typeof raw.twilight === "boolean") result.twilight = raw.twilight
+  result.onCommand = cleanCommand(raw.onCommand)
+  result.offCommand = cleanCommand(raw.offCommand)
   return result
 }
 
@@ -912,6 +926,21 @@ function isProfileValue(reading, values) {
   return Array.isArray(values) && values.indexOf(reading) !== -1
 }
 
+// Whether the schedule alone (no holds, no pausing) says on, or null when there
+// is no schedule (Manual mode, or Sun mode with no location).
+function scheduleOn(settings, location, nowMs) {
+  if (followsSwitch(settings, location)) return null
+  return scheduleAt(settings, location, nowMs).on
+}
+
+// The command to run for a change in the schedule seen between two checks:
+// onCommand as it turns on, offCommand as it turns off, "" otherwise. Nothing
+// runs for the first look (null), so a shell restart doesn't run either.
+function scheduleCommand(settings, previous, current) {
+  if (previous === null || previous === undefined || current === null || previous === current) return ""
+  return current ? settings.onCommand : settings.offCommand
+}
+
 // The main switch. With a schedule, flipping away from it holds until the next
 // scheduled change, and flipping back simply follows the schedule again.
 function switchPatch(settings, location, nowMs, turnOn) {
@@ -1090,6 +1119,8 @@ if (typeof module !== "undefined") {
     switchPatch: switchPatch,
     modePatch: modePatch,
     holdPatch: holdPatch,
+    scheduleOn: scheduleOn,
+    scheduleCommand: scheduleCommand,
     targetKelvin: targetKelvin,
     kelvinColor: kelvinColor,
     viewStrength: viewStrength,

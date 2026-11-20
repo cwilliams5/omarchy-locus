@@ -94,6 +94,9 @@ Item {
   property bool previewing: false
 
   property var lastPlanOn: null
+  // What the schedule alone said at the last check (null: no look yet, or no
+  // schedule), so onCommand and offCommand run as it changes.
+  property var lastScheduleOn: null
   // The temperature tick() last sent, to spot the next ramp step.
   property var lastLevel: null
   // Something else set the temperature, so ramp steps wait for the next change.
@@ -478,6 +481,12 @@ Item {
     return Model.kelvinAt(settings, location, Date.now(), pausedNow)
   }
 
+  // The user's own command, detached, as the schedule turns on or off.
+  function runCommand(command, turningOn) {
+    console.log("locus: running the " + (turningOn ? "on" : "off") + " command")
+    Quickshell.execDetached(["sh", "-c", command])
+  }
+
   // A couple of seconds rather than a jump. Needs a temperature to start from, so
   // a hyprsunset that isn't answering is just told where to end up.
   function fadeTo(kelvin) {
@@ -549,6 +558,10 @@ Item {
       sunset = 0
     }
     plan = Model.desiredState(settings, location, now)
+    var scheduled = Model.scheduleOn(settings, location, now)
+    var command = Model.scheduleCommand(settings, lastScheduleOn, scheduled)
+    lastScheduleOn = scheduled
+    if (command !== "") runCommand(command, scheduled)
     bedtimeNow = Model.bedtimeReached(settings, location, now)
     var lengths = Model.fadeLengths(settings, location, now)
     fadeInNow = Math.round(lengths.inMs / 60000)
@@ -1034,6 +1047,8 @@ Item {
         twilight: root.twilight,
         fadeInNow: root.fadeInNow,
         fadeOutNow: root.fadeOutNow,
+        onCommand: root.settings.onCommand,
+        offCommand: root.settings.offCommand,
         sunsetOffset: root.sunsetOffset,
         fadeIn: root.fadeIn,
         fadeOut: root.fadeOut,
@@ -1064,6 +1079,16 @@ Item {
     function bedtimetemp(kelvin: int): void { root.setBedtimeTemperature(kelvin) }
     // Sun mode's fades follow twilight (sunset to civil dusk, civil dawn to sunrise): on or off.
     function twilight(value: string): void { root.setTwilight(value === "on") }
+    // Shell commands run as the schedule turns on and off; "" for none.
+    function oncommand(command: string): void { root.updateSettings({ onCommand: command }) }
+    function offcommand(command: string): void { root.updateSettings({ offCommand: command }) }
+    // Run one now, to try it: on or off.
+    function runcommand(which: string): string {
+      var command = which === "on" ? root.settings.onCommand : which === "off" ? root.settings.offCommand : ""
+      if (command === "") return "none set"
+      root.runCommand(command, which === "on")
+      return "ran"
+    }
     // Dimmer late at night: on, off, or the time it starts (23:30).
     function dim(value: string): string {
       if (value === "on" || value === "off") {

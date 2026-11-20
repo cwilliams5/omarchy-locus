@@ -51,6 +51,18 @@ Under the slider, **Mild**, **Night**, **Warm** and **Candle** set 4500K, 3400K,
 
 `omarchy toggle nightlight` still works. It uses Omarchy's fixed 4000K, and that stays until the next scheduled change, even during a gradual change.
 
+## Run a command at sunset and sunrise
+
+Locus can run a command of yours as the schedule turns on and off, for example to switch to a dark theme for the night:
+
+```bash
+omarchy-shell io.github.cwilliams5.locus.control oncommand "omarchy theme set tokyo-night"
+omarchy-shell io.github.cwilliams5.locus.control offcommand "omarchy theme set catppuccin-latte"
+omarchy-shell io.github.cwilliams5.locus.control runcommand on    # Try it now
+```
+
+They run in the background with `sh -c`, only when the schedule itself changes (Sun or Custom mode), not for holds, pausing or the switch. If the computer was asleep at sunset, the command runs when it wakes; if it slept through the whole night, nothing runs. Restarting the shell doesn't run either. Set one to `""` to stop it. They're saved in `locus.json` as `onCommand` and `offCommand`.
+
 ## Pausing for apps
 
 Some apps need true colour, like games and photo or video editors. Locus can keep the screen neutral while one of them is in front, and warm it again when you leave it. The **Pause** section of the panel has:
@@ -162,9 +174,9 @@ Locus is a hard fork of [Sundown](https://github.com/WilliamJohnDavisIII/omarchy
 Ideas, not code, from:
 
 - [Dusk](https://github.com/ReidenXerx/omarchy-dusk) by ReidenXerx (MIT): starting before sunset; a fade length you choose; stepping aside for fullscreen apps and apps you name, with a button for the app in front; spacing fade steps by what the eye can tell apart (a few mireds) and looking about once a minute; reading `hyprsunset.conf`'s own switch times so they aren't taken for you; "off until morning" and "warm for an hour"; dimming late at night, below the screen's own minimum, eased in.
-- [f.lux](https://justgetflux.com): the night light the rest descend from, including disabling for fullscreen apps, for the app in front, and for an hour; Movie mode; named colour presets like Candle; a warmer bedtime, and sleeping in at weekends.
+- [f.lux](https://justgetflux.com): the night light the rest descend from, including disabling for fullscreen apps, for the app in front, and for an hour; Movie mode; named colour presets like Candle; a warmer bedtime, and sleeping in at weekends; switching to dark mode at sunset.
 - [Sunset Night Light](https://github.com/agkrishnendu/omarchy-nightlight) by agkrishnendu: a second, warmer temperature later in the evening.
-- [Redshift](https://github.com/jonls/redshift) and [gammastep](https://gitlab.com/chinstrap/gammastep): changing with the sun's height through twilight rather than by the clock.
+- [Redshift](https://github.com/jonls/redshift) and [gammastep](https://gitlab.com/chinstrap/gammastep): changing with the sun's height through twilight rather than by the clock; running your own commands as night starts and ends.
 - [Moonshine](https://github.com/tiagoabiramia/omarchy-moonshine) by Tiago Abi-Ramia: software dimming for Omarchy.
 - [Night Light](https://github.com/key-tone/omarchy-nightlight) by Kenny Keeton: pausing for an hour, or until sunrise; one-click presets, including Night at 3400K and Candle at 1900K; looking up a city with Open-Meteo.
 

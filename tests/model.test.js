@@ -1421,3 +1421,44 @@ test("a found city's name shows with its coordinates and stays in the state file
   assert.strictEqual(settings({ placeName: "Berlin" }).placeName, "", "no name without coordinates")
   assert.strictEqual(settings({ latitude: 1, longitude: 2, placeName: "<i>x</i>" }).placeName.indexOf("<"), -1)
 })
+
+// ---- Commands at sunset and sunrise ---------------------------------------------------
+
+test("commands are empty by default, kept as typed, and bounded", () => {
+  const s = settings({})
+  assert.deepStrictEqual([s.onCommand, s.offCommand], ["", ""])
+  const t = settings({ onCommand: "  omarchy theme set tokyo-night ", offCommand: 42 })
+  assert.deepStrictEqual([t.onCommand, t.offCommand], ["omarchy theme set tokyo-night", ""])
+  assert.strictEqual(settings({ onCommand: "x".repeat(5000) }).onCommand.length, 2000)
+  assert.strictEqual(settings({ onCommand: "a\u0000b" }).onCommand, "ab")
+  assert.ok("onCommand" in Model.splitSettings(t).settings, "a setting, tracked with the rest")
+})
+
+test("a command runs only as the schedule itself turns on or off", () => {
+  const s = settings({ mode: "custom", onTime: "21:00", offTime: "07:00", onCommand: "night", offCommand: "day" })
+  assert.strictEqual(Model.scheduleCommand(s, false, true), "night")
+  assert.strictEqual(Model.scheduleCommand(s, true, false), "day")
+  assert.strictEqual(Model.scheduleCommand(s, true, true), "")
+  assert.strictEqual(Model.scheduleCommand(s, null, true), "", "not on the first look after a restart")
+  assert.strictEqual(Model.scheduleCommand(s, true, null), "", "nor when the schedule goes away")
+  assert.strictEqual(Model.scheduleOn(settings({ mode: "manual" }), place, at(2026, 11, 5, 22)), null)
+  assert.strictEqual(Model.scheduleOn(settings({ mode: "sun" }), null, at(2026, 11, 5, 22)), null)
+  // Through a day of checks, with a hold and Movie mode in the evening: once each way.
+  const held = settings(Object.assign({}, s, Model.holdPatch(s, place, at(2026, 11, 5, 20), "movie")))
+  let previous = null
+  const ran = []
+  for (let now = at(2026, 11, 5, 12); now < at(2026, 11, 6, 12); now += 45000) {
+    const current = Model.scheduleOn(held, place, now)
+    const command = Model.scheduleCommand(held, previous, current)
+    if (command) ran.push(command + " " + new Date(now).getHours())
+    previous = current
+  }
+  assert.deepStrictEqual(ran, ["night 21", "day 7"])
+})
+
+test("waking after sunset runs the night's command once; sleeping through the night runs none", () => {
+  const s = settings({ mode: "custom", onTime: "21:00", offTime: "07:00", onCommand: "night", offCommand: "day" })
+  const before = Model.scheduleOn(s, place, at(2026, 11, 5, 18))
+  assert.strictEqual(Model.scheduleCommand(s, before, Model.scheduleOn(s, place, at(2026, 11, 5, 23))), "night")
+  assert.strictEqual(Model.scheduleCommand(s, before, Model.scheduleOn(s, place, at(2026, 11, 6, 9))), "")
+})
