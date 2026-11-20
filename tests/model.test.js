@@ -384,6 +384,109 @@ test("a hold changes only the state file", () => {
   assert.deepStrictEqual(Model.splitSettings(held).settings, Model.splitSettings(s).settings)
 })
 
+// ---- Presets and Movie mode ---------------------------------------------------
+
+test("presets are fixed temperatures, mildest first like the slider", () => {
+  assert.deepStrictEqual(Model.PRESETS.map((p) => p.name), ["mild", "night", "warm", "candle"])
+  assert.strictEqual(Model.presetKelvin("candle"), 1900)
+  assert.strictEqual(Model.presetKelvin("warm"), 2700)
+  assert.strictEqual(Model.presetKelvin("night"), 3400)
+  assert.strictEqual(Model.presetKelvin("mild"), 4500)
+  assert.strictEqual(Model.presetKelvin("disco"), null)
+  for (let i = 0; i < Model.PRESETS.length; i++) {
+    const kelvin = Model.PRESETS[i].kelvin
+    assert.strictEqual(Model.clampTemp(kelvin), kelvin, "inside the slider's range")
+    if (i > 0) assert.ok(kelvin < Model.PRESETS[i - 1].kelvin, "each warmer than the last")
+    assert.strictEqual(Model.presetName(kelvin), Model.PRESETS[i].name)
+  }
+  assert.strictEqual(Model.presetName(3000), "", "a temperature between presets matches none")
+})
+
+test("Movie mode is milder for two and a half hours, then the schedule again", () => {
+  const s = settings({ mode: "custom", onTime: "21:00", offTime: "07:00", temperature: 2000 })
+  const now = at(2026, 11, 5, 21, 30)
+  const patch = Model.holdPatch(s, place, now, "movie")
+  assert.deepStrictEqual(patch.override, { on: true, until: now + 150 * MIN, temperature: Model.MOVIE_TEMP })
+  const held = settings(Object.assign({}, s, patch))
+  assert.deepStrictEqual(held.override, patch.override, "the temperature survives saving")
+  assert.strictEqual(Model.kelvinAt(held, place, now + MIN), 5000)
+  assert.strictEqual(Model.kelvinAt(held, place, now + 149 * MIN), 5000)
+  assert.strictEqual(Model.targetKelvin(held, now + MIN), 5000)
+  assert.strictEqual(Model.kelvinAt(held, place, now + 150 * MIN), 2000, "back to the night's temperature")
+  assert.strictEqual(Model.targetKelvin(held, now + 150 * MIN), 2000)
+  assert.strictEqual(Model.nextDueAt(held, place, now + 60 * MIN, []), now + 150 * MIN, "and a check comes then")
+  assert.strictEqual(Model.kelvinAt(held, place, now + MIN, true), Model.OFF_TEMP, "a paused app still wins")
+})
+
+test("Movie mode works in the day and in Manual mode, and takes a length", () => {
+  const noon = at(2026, 11, 5, 12)
+  const day = settings({ mode: "sun", temperature: 2000 })
+  const held = settings(Object.assign({}, day, Model.holdPatch(day, place, noon, "movie")))
+  assert.strictEqual(Model.kelvinAt(held, place, noon + MIN), 5000)
+  const manual = settings({ mode: "manual", manualOn: false })
+  const film = settings(Object.assign({}, manual, Model.holdPatch(manual, place, noon, "movie", 100)))
+  assert.deepStrictEqual(Model.desiredState(film, place, noon + 99 * MIN), { on: true, until: noon + 100 * MIN })
+  assert.strictEqual(Model.kelvinAt(film, place, noon + 101 * MIN), Model.OFF_TEMP)
+  const long = Model.holdPatch(manual, place, noon, "movie", 5000)
+  assert.strictEqual(long.override.until, noon + Model.MAX_HOLD_MINUTES * MIN, "at most 12 hours")
+  assert.deepStrictEqual(Model.splitSettings(film).settings, Model.splitSettings(manual).settings, "only the state file changes")
+})
+
+test("choosing a temperature during Movie mode shows it for the rest of the hold", () => {
+  const s = settings({ mode: "custom", onTime: "21:00", offTime: "07:00", temperature: 2000 })
+  const now = at(2026, 11, 5, 21, 30)
+  const film = settings(Object.assign({}, s, Model.holdPatch(s, place, now, "movie")))
+  const patch = Model.temperaturePatch(film, 2700, now + 10 * MIN)
+  assert.deepStrictEqual(patch, { temperature: 2700, override: { on: true, until: now + 150 * MIN } })
+  const after = settings(Object.assign({}, film, patch))
+  assert.strictEqual(Model.kelvinAt(after, place, now + 11 * MIN), 2700)
+  assert.strictEqual(Model.desiredState(after, place, now + 149 * MIN).until, now + 150 * MIN, "the hold keeps its end")
+  // Any other time it saves the temperature and nothing else.
+  assert.deepStrictEqual(Model.temperaturePatch(s, 9000, now), { temperature: Model.MAX_TEMP })
+  const off = settings(Object.assign({}, s, Model.holdPatch(s, place, now, "off", 60)))
+  assert.deepStrictEqual(Model.temperaturePatch(off, 2700, now), { temperature: 2700 })
+})
+
+test("a hold's own temperature is checked, and only a warm hold keeps one", () => {
+  const until = at(2026, 11, 5, 23)
+  assert.strictEqual(settings({ override: { on: true, until, temperature: 9000 } }).override.temperature, Model.MAX_TEMP)
+  assert.strictEqual(settings({ override: { on: true, until, temperature: 100 } }).override.temperature, Model.MIN_TEMP)
+  assert.deepStrictEqual(settings({ override: { on: true, until, temperature: "hot" } }).override, { on: true, until })
+  assert.deepStrictEqual(settings({ override: { on: false, until, temperature: 4000 } }).override, { on: false, until })
+  // A plain warm hold ("Warm 1 h") still uses the saved temperature.
+  const warm = settings({ temperature: 2200, override: { on: true, until } })
+  assert.strictEqual(Model.targetKelvin(warm, until - MIN), 2200)
+})
+
+test("a warm hold ending in the day leaves that evening's warm-up alone", () => {
+  const s = settings({ mode: "custom", onTime: "21:00", offTime: "07:00", temperature: 2000, fadeIn: 60 })
+  // Movie mode from 18:00 ends at 20:30, half an hour before the schedule turns on.
+  const film = settings(Object.assign({}, s, Model.holdPatch(s, place, at(2026, 11, 5, 18), "movie")))
+  const patch = Model.holdEndPatch(film.override, film, place)
+  assert.deepStrictEqual(patch, { override: null })
+  const after = settings(Object.assign({}, film, patch))
+  assert.ok(Model.kelvinAt(after, place, at(2026, 11, 5, 21, 15)) > 2000, "still warms up gradually at 21:00")
+  // Ending at night still skips the warm-up, as before.
+  const night = settings(Object.assign({}, s, Model.holdPatch(s, place, at(2026, 11, 5, 20), "movie")))
+  assert.strictEqual(Model.holdEndPatch(night.override, night, place).rampSkipUntil, at(2026, 11, 5, 22, 30) + 60 * MIN)
+  // Manual mode has no warm-up to protect either way.
+  const manual = settings({ mode: "manual" })
+  assert.strictEqual(Model.kelvinAt(settings(Object.assign({}, manual, Model.holdEndPatch({ on: true, until: at(2026, 11, 5, 20) }, manual, place))), place, at(2026, 11, 5, 21)), Model.OFF_TEMP)
+})
+
+test("leaving Movie mode at night fades to the night's temperature", () => {
+  const s = settings({ mode: "custom", onTime: "21:00", offTime: "07:00", temperature: 2000 })
+  const start = at(2026, 11, 5, 21, 30)
+  const film = settings(Object.assign({}, s, Model.holdPatch(s, place, start, "movie")))
+  const run = simulate(film, place, start, start + 140 * MIN)
+  assert.strictEqual(run.last, 5000)
+  assert.strictEqual(run.steps.length, 1, "one send for the whole film")
+  const end = start + 150 * MIN
+  const after = settings(Object.assign({}, film, Model.holdEndPatch(film.override, film, place)))
+  assert.strictEqual(Model.kelvinAt(after, place, end), 2000)
+  assert.ok(Model.isBigJump(5000, 2000), "a jump the service fades over two seconds")
+})
+
 // ---- Settings and state, in two files ------------------------------------------
 
 test("every setting has exactly one home", () => {
@@ -666,7 +769,7 @@ function simulate(s, location, from, to, profileMinutes) {
   while (now < to) {
     checks.push(now)
     const level = Model.kelvinAt(s, location, now)
-    if (Model.isVisibleStep(last, level, s.temperature)) {
+    if (Model.isVisibleStep(last, level, Model.targetKelvin(s, now))) {
       steps.push({ at: now, from: last, to: level })
       last = level
     }

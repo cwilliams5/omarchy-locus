@@ -44,5 +44,12 @@
   "hold.morning": "Off till morning",
   "hold.morningTip": "Off for the rest of the night, or for tonight if it's still day",
   "hold.resume": "Back to schedule",
-  "hold.resumeTip": "End the hold and follow the schedule again"
+  "hold.resumeTip": "End the hold and follow the schedule again",
+  "hold.movie": "Movie 2.5 h",
+  "hold.movieTip": "Milder, at %1K, for two and a half hours, then back to the schedule",
+  "status.movieUntil": "Movie mode until %1",
+  "preset.mild": "Mild",
+  "preset.night": "Night",
+  "preset.warm": "Warm",
+  "preset.candle": "Candle"
 }

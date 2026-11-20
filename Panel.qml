@@ -130,6 +130,7 @@ Panel {
     if (previewing) return strings.t("status.preview")
     if (serviceReady && service.pausedNow)
       return service.frontLabel !== "" ? strings.t("status.paused").arg(service.frontLabel) : strings.t("status.pausedPlain")
+    if (serviceReady && service.movie && switchOn && untilMs) return strings.t("status.movieUntil").arg(clockText(untilMs))
     if (switchOn && untilMs) return strings.t("status.onUntil").arg(clockText(untilMs))
     if (!switchOn && untilMs) return strings.t("status.offUntil").arg(clockText(untilMs))
     return switchOn ? strings.t("status.on") : strings.t("status.off")
@@ -257,6 +258,16 @@ Panel {
           }
 
           Button {
+            text: strings.t("hold.movie")
+            tooltipText: strings.t("hold.movieTip").arg(root.serviceReady ? root.service.movieTemp : 5000)
+            bordered: true
+            selected: root.serviceReady && root.service.movie
+            foreground: root.bar.foreground
+            fontFamily: root.bar.fontFamily
+            onClicked: if (root.serviceReady) root.service.hold("movie", 0)
+          }
+
+          Button {
             visible: root.serviceReady && root.service.canHoldUntilMorning
             text: strings.t("hold.morning")
             tooltipText: strings.t("hold.morningTip")
@@ -323,6 +334,18 @@ Panel {
             value: root.sliderValueFor(root.temperature)
             onMoved: function(sliderValue) { if (root.serviceReady) root.service.preview(root.kelvinFor(sliderValue)) }
             onReleased: function(sliderValue) { if (root.serviceReady) root.service.setTemperature(root.kelvinFor(sliderValue)) }
+          }
+
+          // One click to a common temperature, mildest first like the slider.
+          ButtonGroup {
+            value: root.serviceReady ? root.service.preset : ""
+            focusable: false
+            foreground: root.bar.foreground
+            fontFamily: root.bar.fontFamily
+            options: (root.serviceReady ? root.service.presets : []).map(function(preset) {
+              return { value: preset.name, label: strings.t("preset." + preset.name), tooltip: strings.t("kelvin").arg(preset.kelvin) }
+            })
+            onChanged: function(value) { if (root.serviceReady) root.service.setPreset(value) }
           }
         }
 

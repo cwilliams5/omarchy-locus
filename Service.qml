@@ -148,6 +148,12 @@ Item {
   readonly property bool pauseFullscreen: settings.pauseFullscreen
   readonly property var pauseApps: settings.pauseApps
   readonly property bool holding: settings.override !== null
+  // A hold with its own, milder temperature.
+  readonly property bool movie: holding && settings.override.temperature !== undefined
+  readonly property int movieTemp: Model.MOVIE_TEMP
+  readonly property var presets: Model.PRESETS
+  // The preset the saved temperature matches, or "".
+  readonly property string preset: Model.presetName(settings.temperature)
   // "Off until morning" needs a schedule to know when morning is.
   readonly property bool canHoldUntilMorning: mode !== "manual" && !(mode === "sun" && location === null)
 
@@ -234,11 +240,20 @@ Item {
     apply(clamped)
   }
 
+  // In Movie mode this also ends the milder temperature, keeping the hold's end.
   function setTemperature(kelvin) {
     var clamped = Model.clampTemp(kelvin)
     externalHold = false
-    updateSettings({ temperature: clamped })
+    updateSettings(Model.temperaturePatch(settings, clamped, Date.now()))
     preview(clamped)
+  }
+
+  // True when it's a preset's name.
+  function setPreset(name) {
+    var kelvin = Model.presetKelvin(name)
+    if (kelvin === null) return false
+    setTemperature(kelvin)
+    return true
   }
 
   // True when saved. Empty text goes back to the automatic location.
@@ -368,7 +383,7 @@ Item {
     if (!settingsLoaded || !locationChecked) return
     var now = Date.now()
     if (settings.override && now >= settings.override.until) {
-      updateSettings(Model.holdEndPatch(settings.override, settings))
+      updateSettings(Model.holdEndPatch(settings.override, settings, location))
       return
     }
 
@@ -410,7 +425,7 @@ Item {
       if (first) apply(level)
       else fadeTo(level)
     } else if (!externalHold && !previewing && !fadeTimer.running
-               && Model.isVisibleStep(lastLevel, level, temperature)) {
+               && Model.isVisibleStep(lastLevel, level, Model.targetKelvin(settings, Date.now()))) {
       // A fade's next step goes straight on; a bigger jump, like waking up in the
       // middle of a fade or changing a setting during one, fades over 2 seconds.
       var jump = Model.isBigJump(lastLevel, level)
@@ -823,6 +838,7 @@ Item {
         autoLocation: root.autoLocation,
         externalHold: root.externalHold,
         override: root.settings.override,
+        movie: root.movie,
         sunsetOffset: root.sunsetOffset,
         fadeIn: root.fadeIn,
         fadeOut: root.fadeOut,
@@ -838,6 +854,10 @@ Item {
     function off(): void { root.setSwitch(false) }
     function toggle(): void { root.setSwitch(!root.switchOn) }
     function set(kelvin: int): void { root.setTemperature(kelvin) }
+    // Save a preset's temperature: mild, night, warm or candle.
+    function preset(name: string): string { return root.setPreset(name) ? "ok" : "invalid" }
+    // Milder (5000K) for two and a half hours, then back to the schedule.
+    function movie(): string { return root.hold("movie", 0) ? "ok" : "invalid" }
     function preview(kelvin: int): void { root.preview(kelvin) }
     function schedule(mode: string): void { root.setMode(mode) }
     function location(coordinates: string): string {

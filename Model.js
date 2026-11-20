@@ -30,6 +30,16 @@ var MIN_STEP_MS = 5000
 var CHECK_MS = 60000 // Longest gap between looks at hyprsunset when nothing is due
 var PROFILE_RECHECK_MS = [2000, 62000] // After a hyprsunset.conf switch time; it can land up to a minute late
 var MAX_HOLD_MINUTES = 720
+// One-click temperatures, mildest first, the way the slider runs.
+var PRESETS = [
+  { name: "mild", kelvin: 4500 },
+  { name: "night", kelvin: 3400 },
+  { name: "warm", kelvin: 2700 },
+  { name: "candle", kelvin: 1900 }
+]
+// Movie mode, after f.lux: milder for long enough to watch a film, then the schedule again.
+var MOVIE_TEMP = 5000
+var MOVIE_MINUTES = 150
 var PAUSE_APPS_MAX = 32
 var APP_NAME_MAX = 64
 
@@ -217,8 +227,11 @@ function normalizeSettings(raw) {
     result.longitude = raw.longitude
   }
   var override = raw.override
-  if (override && typeof override.on === "boolean" && Number.isFinite(override.until))
+  if (override && typeof override.on === "boolean" && Number.isFinite(override.until)) {
     result.override = { on: override.on, until: override.until }
+    // A warm hold can carry its own temperature (Movie mode).
+    if (override.on && Number.isFinite(override.temperature)) result.override.temperature = clampTemp(override.temperature)
+  }
   if (typeof raw.ramp === "boolean") result.ramp = raw.ramp
   if (Number.isFinite(raw.rampSkipUntil)) result.rampSkipUntil = raw.rampSkipUntil
   if (typeof raw.autoLocation === "boolean") result.autoLocation = raw.autoLocation
@@ -446,13 +459,22 @@ function mixKelvin(from, to, progress) {
   return rounded === FRESH_TEMP ? rounded + 10 : rounded
 }
 
+// The temperature the night light is heading for: a hold's own (Movie mode)
+// while it lasts, otherwise the saved one.
+function targetKelvin(settings, nowMs) {
+  var override = settings.override
+  if (override && nowMs < override.until && override.on && Number.isFinite(override.temperature)) return override.temperature
+  return settings.temperature
+}
+
 // The temperature the screen should be at now, including any ramp in progress.
 // Worked out from the clock alone, so a restart or suspend lands in the right place.
 // A paused app in front keeps the screen neutral whatever the schedule says.
 function kelvinAt(settings, location, nowMs, paused) {
   if (paused === true || !desiredState(settings, location, nowMs).on) return OFF_TEMP
+  var target = targetKelvin(settings, nowMs)
   var ramp = rampAt(settings, location, nowMs)
-  return ramp ? mixKelvin(OFF_TEMP, settings.temperature, ramp.progress) : settings.temperature
+  return ramp ? mixKelvin(OFF_TEMP, target, ramp.progress) : target
 }
 
 // The fade the schedule is in now: how far it is from the daytime value (0) to
@@ -481,12 +503,17 @@ function rampAt(settings, location, nowMs) {
   return ramp
 }
 
-// A hold that was keeping the night light on has ended at the moment the schedule
-// takes over. Skip that evening's warm-up, or the screen would clear and start again.
-function holdEndPatch(override, settings) {
+// A hold that was keeping the night light on has ended while the schedule says
+// on. Skip that evening's warm-up, or the screen would clear and start again.
+// A warm hold ending in the day leaves the evening's warm-up alone. (Without a
+// location, as in older callers, it skips it either way.)
+function holdEndPatch(override, settings, location) {
   var patch = { override: null }
+  if (!override || !override.on) return patch
+  if (settings && location !== undefined && !followsSwitch(settings, location)
+      && !scheduleAt(settings, location, override.until).on) return patch
   var warmUp = settings && Number.isFinite(settings.fadeIn) ? settings.fadeIn * MINUTE_MS : RAMP_IN_MS
-  if (override && override.on) patch.rampSkipUntil = override.until + warmUp
+  patch.rampSkipUntil = override.until + warmUp
   return patch
 }
 
@@ -623,11 +650,16 @@ function switchPatch(settings, location, nowMs, turnOn) {
 }
 
 // A hold chosen from the panel or the command line: "off" or "on" for a number
-// of minutes (1 to 12 hours), "morning" (off until the night ends; in the day,
-// that skips tonight), or "clear" (back to the schedule). Null when it doesn't
-// apply: "morning" needs a schedule, and an unknown kind or length.
+// of minutes (1 to 12 hours), "movie" (milder, MOVIE_TEMP, for MOVIE_MINUTES
+// unless given a length), "morning" (off until the night ends; in the day, that
+// skips tonight), or "clear" (back to the schedule). Null when it doesn't apply:
+// "morning" needs a schedule, and an unknown kind or length.
 function holdPatch(settings, location, nowMs, kind, minutes) {
   if (kind === "clear") return { override: null }
+  if (kind === "movie") {
+    var movieMinutes = Number(minutes) > 0 ? clampInt(minutes, 1, MAX_HOLD_MINUTES) : MOVIE_MINUTES
+    return { override: { on: true, until: nowMs + movieMinutes * MINUTE_MS, temperature: MOVIE_TEMP } }
+  }
   if (kind === "morning") {
     if (followsSwitch(settings, location)) return null
     var schedule = scheduleAt(settings, location, nowMs)
@@ -638,6 +670,30 @@ function holdPatch(settings, location, nowMs, kind, minutes) {
   if (!Number.isFinite(Number(minutes)) || Number(minutes) <= 0) return null
   var length = clampInt(minutes, 1, MAX_HOLD_MINUTES)
   return { override: { on: kind === "on", until: nowMs + length * MINUTE_MS } }
+}
+
+// Saving a temperature. During Movie mode it also drops the hold's own
+// temperature, so the one just chosen shows for the rest of the hold.
+function temperaturePatch(settings, kelvin, nowMs) {
+  var patch = { temperature: clampTemp(kelvin) }
+  var override = settings.override
+  if (override && nowMs < override.until && override.on && Number.isFinite(override.temperature))
+    patch.override = { on: true, until: override.until }
+  return patch
+}
+
+// A preset's temperature by name, or null.
+function presetKelvin(name) {
+  for (var i = 0; i < PRESETS.length; i++)
+    if (PRESETS[i].name === name) return PRESETS[i].kelvin
+  return null
+}
+
+// The preset a temperature matches, or "".
+function presetName(kelvin) {
+  for (var i = 0; i < PRESETS.length; i++)
+    if (PRESETS[i].kelvin === kelvin) return PRESETS[i].name
+  return ""
 }
 
 function modePatch(settings, mode, currentlyOn) {
@@ -705,6 +761,13 @@ if (typeof module !== "undefined") {
     switchPatch: switchPatch,
     modePatch: modePatch,
     holdPatch: holdPatch,
+    targetKelvin: targetKelvin,
+    presetKelvin: presetKelvin,
+    temperaturePatch: temperaturePatch,
+    presetName: presetName,
+    PRESETS: PRESETS,
+    MOVIE_TEMP: MOVIE_TEMP,
+    MOVIE_MINUTES: MOVIE_MINUTES,
     MAX_HOLD_MINUTES: MAX_HOLD_MINUTES
   }
 }
