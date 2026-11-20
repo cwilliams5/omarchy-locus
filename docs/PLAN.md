@@ -23,7 +23,8 @@ in the same commit as the work.
 ## Where things stand (update this when you stop)
 
 - **2026-11-19, end of session 1:** A1, A2, B1 done, merged, pushed, tested
-  live; the installed copy is on `main`; dotfiles updated. **Next: B2.**
+  live; the installed copy is on `main`; dotfiles updated.
+- **2026-11-19, session 2:** B2 done. **Next: B3.**
 - Cody's live Locus state at that point: Sun mode, 3000K, and a hold "off
   until morning" (ends at sunrise, 6:30 AM on 2026-11-20). If a test changes
   the hold at night, put it back with
@@ -63,7 +64,7 @@ Phase A, foundation:
 Phase B, features that cost nothing to run:
 
 - [x] B1. Holds for a set time ("off for an hour", "warm for an hour") (8ae66f3, tested live: holds, expiry, resume, the panel)
-- [ ] B2. Presets, and Movie mode
+- [x] B2. Presets, and Movie mode (88a000d, tested live: presets, Movie mode, a temperature chosen during it, the panel; also fixed B1's warm hold ending in the day skipping that evening's warm-up)
 - [ ] B3. Bedtime level, with weekend sleep-in
 - [ ] B4. Late-night dimming
 - [ ] B5. The Arc mark as the bar icon
@@ -153,9 +154,13 @@ Gotchas met so far:
   separator -> Pause column. Local components at the end: `SwitchRow`,
   `StepRow`, `TimeRow`. All text `Text.PlainText`; strings in `i18n/en.json`
   via `strings.t()`. The panel scrolls (`Flickable`) when the screen is short.
-- **B2 note:** a hold with its own temperature (Movie mode) means the
-  `override` grows to `{ on, until, temperature }`: accept and clamp it in
-  `normalizeSettings`, and make `kelvinAt` use it while the hold lasts.
+- **Holds with their own temperature** (B2's Movie mode): `override` is
+  `{ on, until, temperature? }`; `Model.targetKelvin` is what the night light
+  heads for now (the hold's temperature, else the saved one). Anything that
+  compares against "the temperature" (the service's `step`, simulations)
+  must use `targetKelvin`, not `settings.temperature`.
+- Screenshots: Cody's Bitwarden window blanks itself out of screen captures
+  (a black rectangle), even under the panel. Don't move it; read around it.
 
 ## Phase A
 

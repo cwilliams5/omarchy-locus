@@ -179,8 +179,7 @@ Quickshell 0.3.2.
 
 ## Working on it
 
-- Tests: `TZ=America/New_York node tests/model.test.js` (63 as of
-  2026-11-19). They also pass in Los Angeles and UTC; the "sun schedule
+- Tests: `TZ=America/New_York node tests/model.test.js`. They also pass in Los Angeles and UTC; the "sun schedule
   follows the day" test assumes New York and fails in Asia/Tokyo (inherited).
 - `omarchy plugin validate .` checks the manifest.
 - To try a branch live: `git -C ~/.config/omarchy/plugins/io.github.cwilliams5.locus fetch ~/Work/omarchy-locus <branch>`,
