@@ -73,6 +73,7 @@ Phase B, features that cost nothing to run:
 - [x] B7. Fades that follow twilight (option) (4578241, tested live: the lengths for Los Angeles tonight, 27 min each, and the panel rows)
 - [-] B8. Daytime tint: **skipped** (Cody, 2026-11-20; see "Decisions")
 - [x] B9. Location by city name (74f87f4, tested live: Berlin found and shown, a miss, a typo, back to automatic)
+- [x] Review fixes (e101b82, 2026-11-20 overnight): an independent review found twilight after midnight, long winter nights, Movie-mode steps, a property hiding Item.enabled, a dimming jump, and gamma left dim on removal; all fixed with tests that fail on the old code, tested live
 - [x] B11. The header switch turns Locus on or off, Omarchy-style (Cody's call, 2026-11-20; tested live: migration of his files, off, a warm hold while off, on at night, "manual" as Always, the status line, the icon without its point)
 - [x] B10. Run a command at sunset and sunrise (tested live: runcommand, and a real on and off edge, each run once, on the minute, under a hold)
 

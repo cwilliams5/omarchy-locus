@@ -163,8 +163,11 @@ preview.png        the marketplace listing card (a smaller copy of media/hero.pn
   its `manualOn` was).
 - Over the night, `Model.targetKelvin` moves from the saved temperature to
   the bedtime level (`bedtimeAt`), and `Model.gammaAt` eases dimming in
-  (`dimAt`) and back out with the clear-down. `nightAt` places clock times
-  like bedtime in the night under way. With twilight on, `fadeInMs` /
+  (`dimAt`) and back out with the clear-down (`clearDownShare`). `nightAt`
+  is the night under way and `clockInNight` places clock times like bedtime
+  in it: their first time inside the night, else a time within 12 hours
+  before the start covers the whole night. (Placing them "nearest the
+  start" broke nights longer than 12 hours.) With twilight on, `fadeInMs` /
   `fadeOutMs` come from civil dusk and dawn (`twilightTimes`).
 - `Model.nextDueAt` lists every moment something changes by itself (switches,
   fade steps, bedtime, dimming, hold ends, `hyprsunset.conf` times); the
@@ -225,6 +228,15 @@ Quickshell 0.3.2.
   `set: true` once anything has set it, not `[[EMPTY]]`.
 - The Omarchy UI kit (`qs.Ui`: `KeyboardPanel`, `Button`, `PanelHero`...)
   renders text as plain text.
+- **Never declare a QML property named `enabled`** (or another `Item`
+  property) on a component: it hides the built-in one, and Omarchy's bar
+  (`Util.itemContainsPoint`) reads `item.enabled` up the parent chain to
+  decide what can be clicked. Locus's on/off is `locusOn` for that reason.
+- Touching a plugin file in the installed copy makes the shell reload that
+  plugin in place ("Local plugin changed, reloading"): the service's
+  `Component.onDestruction` runs (gamma goes back to 100%), then a new one
+  starts. `omarchy restart shell` kills the process instead, so teardown code
+  doesn't run there.
 - `omarchy plugin update` fetches `origin HEAD` and only fast-forwards: a
   commit made inside the installed copy blocks updates.
 - `omarchy plugin add` and `update` sometimes print "omarchy-shell is not
