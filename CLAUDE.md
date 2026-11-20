@@ -10,10 +10,13 @@ much as the rules.
 Locus is a night light for Omarchy, written as an Omarchy shell plugin (QML
 and JavaScript inside the long-running Quickshell shell). It warms the
 screen through `hyprsunset`: at sunset (optionally earlier or later), at
-hours you pick, or by hand. It fades in and out over lengths you choose, has
-a temperature slider from 500K to 5500K (below 1000K a screen shader takes
-over), and keeps the screen neutral while a chosen app, or any real
-fullscreen app, is in front.
+hours you pick, or by hand. It fades in and out over lengths you choose (or
+with twilight), has a temperature slider from 500K to 5500K with presets
+(below 1000K a screen shader takes over), holds for a set time (Off 1 h,
+Warm 1 h, Movie mode, Off till morning), an optional warmer bedtime level
+and late-night dimming (`hyprsunset` gamma), a 24-hour view in its panel,
+location by city name, commands at sunset and sunrise, and keeps the screen
+neutral while a chosen app, or any real fullscreen app, is in front.
 
 It replaces nothing. Omarchy's own Night Light (a 4000K on/off toggle in the
 menu and the indicators) keeps working; Locus treats a change made that way
@@ -38,9 +41,10 @@ hyprsunset will switch by itself.
   is on; #2: allow up to 5500K). They are left open on purpose. Don't touch
   them, and don't open more: Locus is its own project now.
 - **Ideas from elsewhere** are credited in the README's Credits section:
-  Dusk (`ReidenXerx/omarchy-dusk`) and f.lux so far. When a feature borrows an
-  idea, add its source there in the same commit. Ideas only: no code was
-  copied from Dusk.
+  Dusk (`ReidenXerx/omarchy-dusk`), f.lux, Kenny Keeton's Night Light,
+  agkrishnendu's Sunset Night Light, Moonshine, Redshift and gammastep. When
+  a feature borrows an idea, add its source there in the same commit. Ideas
+  only: no code was copied from any of them.
 - **Sister projects** (Cody's, independent of Locus):
   - **Transom** (`cwilliams5/omarchy-transom`), the bottom taskbar.
   - **Sash** (`cwilliams5/omarchy-sash`), Windows-style maximize on floating
@@ -143,20 +147,37 @@ icon.svg           the app tile
   a pure function of the time: off, the temperature, or a point along a fade
   (`rampAt`; even steps in mireds via `mixKelvin`). A paused app forces off.
 - `Model.desiredState` holds the switch logic: Sun, Custom or Manual, a hold
-  (`override`) that lasts until the next scheduled change, and Sun mode with
-  no location following the switch instead.
+  (`override`: until the next scheduled change, or a set time, optionally
+  with its own temperature for Movie mode), and Sun mode with no location
+  following the switch instead.
+- Over the night, `Model.targetKelvin` moves from the saved temperature to
+  the bedtime level (`bedtimeAt`), and `Model.gammaAt` eases dimming in
+  (`dimAt`) and back out with the clear-down. `nightAt` places clock times
+  like bedtime in the night under way. With twilight on, `fadeInMs` /
+  `fadeOutMs` come from civil dusk and dawn (`twilightTimes`).
+- `Model.nextDueAt` lists every moment something changes by itself (switches,
+  fade steps, bedtime, dimming, hold ends, `hyprsunset.conf` times); the
+  service sleeps until the next, never more than a minute.
 - `Service.tick()` runs on `checkTimer`: work out the plan, start a look,
   sync the shader, schedule the next check. `handleProbe` reads the answer,
   spots a restarted hyprsunset (6000K), a `hyprsunset.conf` switch (put it
   back) or a hand (hold until the next change), then calls `step()`, which
   sends a change if one is due and visible, fading big jumps over 2 s.
+- Gamma (dimming) has its own process, `syncGamma`, run only when the wanted
+  value changes (rule 11). The schedule's own on and off edges run the
+  user's `onCommand` / `offCommand` (`scheduleCommand`; never on the first
+  look after a restart).
+- The panel's 24-hour strip comes from `Model.daySamples`, worked out only
+  while the panel is open.
 - Pausing is bindings, not polling: `ToplevelManager.activeToplevel` for the
   app's class, `Hyprland.activeToplevel.lastIpcObject.fullscreen` for real
   fullscreen, refreshed on Hyprland's `fullscreen`/`activewindowv2`/
   `closewindow` events only while "pause for fullscreen" is on.
-- Location, in order: coordinates typed in the panel, IP detection (off by
-  default, `geo.omarchy.org`), Omarchy's weather location if it has
-  coordinates, the time zone's main city from `zone1970.tab`.
+- Location, in order: a city or coordinates typed in the panel (a city is
+  looked up once with Open-Meteo's geocoding, on Enter, never in the
+  background), IP detection (off by default, `geo.omarchy.org`), Omarchy's
+  weather location if it has coordinates, the time zone's main city from
+  `zone1970.tab`.
 - Settings load from two files (`Model.combineSettings`) and save back split
   (`Model.splitSettings`). The first time Locus runs with no settings, it
   copies Sundown's `heliotrope.json` once (owner-only); a settings file that
@@ -222,35 +243,23 @@ Plain, practical, Windows terms where they help, no hype, no emoji. See
 `branding/BRANDING.md` for the project's own voice notes (no health claims;
 temperatures as `3000K`). Commit messages say what changed and why.
 
-## Status and open ideas (2026-11-19)
+## Status and open ideas (2026-11-20)
 
 The go-public run (Cody's skill) has done naming, logo and branding, and is
 **paused for development**. **The working plan, with designs, order and a
 status list, is `docs/PLAN.md`: read it before starting work.** After the
 features: the README with screenshots, publishing (the repo is private until
-then), and the marketplace. The summary below is the short version.
+then), and the marketplace.
 
-Planned, all free to run:
+Done in the development phase: settings and state in two files, finer
+rounding for deep red, timed holds, presets and Movie mode, the bedtime
+level, late-night dimming, the Arc mark as the bar icon, the 24-hour view,
+twilight fades, location by city name, commands at sunset and sunrise.
 
-- Holds for a set time: "off for an hour", "warm for an hour".
-- A second, warmer bedtime level, set from a wake-up time, with an optional
-  weekend sleep-in (f.lux).
-- Late-night dimming through `hyprsunset gamma`, eased in after a set time.
-- Settings in Omarchy's settings panel and `shell.json`, with holds kept in a
-  separate state file so they don't churn Cody's dotfiles.
-- Fades that follow twilight (an option).
-- Presets: Candle, Movie mode (milder for 2.5 h).
-- A daytime tint, off by default.
-- A 24-hour view of the night in the panel, drawn only while it's open.
-- Location by city name (one lookup when typed).
-- Run a command at sunset or sunrise.
-- The Arc mark as the bar icon, instead of the font glyph.
-- Finer rounding below about 2000K: at 10K steps, fades to deep red step
-  about 10 mireds, which shows.
-
-Behind toggles, off by default: screen effects such as Darkroom, the ambient
-light sensor, a different strength per monitor, switching off during calls,
-smart bulbs.
+Waiting on Cody: a daytime tint (B8; recommended against, see the plan),
+and which heavier features, if any, to build behind toggles (phase C):
+screen effects such as Darkroom, the ambient light sensor, switching off
+during calls, a different strength per monitor, smart bulbs.
 
 When Locus goes public, point the old fork's README at it.
 
