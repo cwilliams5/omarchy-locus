@@ -103,12 +103,12 @@ or look up a city.
 
 ```bash
 omarchy plugin remove io.github.cwilliams5.locus
-hyprctl hyprsunset identity
+hyprctl hyprsunset identity && hyprctl hyprsunset gamma 100
 rm ~/.local/state/omarchy/settings/locus.json ~/.local/state/omarchy/settings/locus-state.json
 ```
 
-The second line clears any tint left on the screen, and the third deletes your
-settings. If you took `NightLight` out of the indicators, put it back in
+The second line clears any tint or dimming left on the screen, and the third
+deletes your settings. If you took `NightLight` out of the indicators, put it back in
 `~/.config/omarchy/shell.json`.
 
 **Tested with** Omarchy 4.5.0, Hyprland 0.56.2, hyprsunset 0.4.0 and
@@ -174,9 +174,9 @@ For a while rather than for good, use the buttons under it: **Off 1 h** and
 long enough to watch a film; **Off till morning** for the rest of the night
 (or for tonight, if it's still day); and **Back to schedule** ends any hold.
 Turning Locus on or off ends a hold too. **Warm 1 h** and **Movie 2.5 h** also
-work while Locus is off, which it is again when they end. Choosing a
-temperature during Movie mode keeps the hold but shows the temperature you
-chose.
+work while Locus is off, which it is again when they end. Changing the
+temperature during Movie mode changes it for the rest of the film only; your
+saved temperature stays as it was.
 
 ### Modes
 

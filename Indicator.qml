@@ -64,7 +64,7 @@ BarIndicator {
 
   onPressed: function(pressedButton) {
     if (!root.serviceReady) return
-    if (pressedButton === Qt.RightButton) root.service.setEnabled(!root.service.enabled)
+    if (pressedButton === Qt.RightButton) root.service.setEnabled(!root.service.locusOn)
     else root.service.panelToggleRequested(root.QsWindow.window)
   }
 

@@ -28,7 +28,8 @@ Panel {
   readonly property int maxTemp: serviceReady ? service.maxTemp : 5500
   readonly property bool nightOn: serviceReady && service.nightOn
   // Locus on or off: the switch in the header, and right-click on the icon.
-  readonly property bool enabled: serviceReady && service.enabled
+  // Not named "enabled", which would hide Item.enabled (Omarchy's bar reads it).
+  readonly property bool locusOn: serviceReady && service.locusOn
   readonly property bool previewing: serviceReady && service.previewing
   readonly property string mode: serviceReady ? service.mode : "sun"
   // The temperature showing now: the bedtime one once bedtime has come.
@@ -95,7 +96,7 @@ Panel {
   }
 
   function flipSwitch() {
-    if (serviceReady) service.setEnabled(!enabled)
+    if (serviceReady) service.setEnabled(!locusOn)
   }
 
   // Just the place. Where it came from shows in the buttons beside it.
@@ -152,7 +153,7 @@ Panel {
       ArcIcon {
         stroke: 8
         color: button.foreground
-        pointColor: !root.enabled ? "transparent" : root.nightOn ? Commons.Color.accent : button.foreground
+        pointColor: !root.locusOn ? "transparent" : root.nightOn ? Commons.Color.accent : button.foreground
       }
     }
     dimmed: !root.nightOn
@@ -227,12 +228,12 @@ Panel {
               size: Style.font.display
               stroke: 7
               color: root.bar.foreground
-              pointColor: !root.enabled ? "transparent" : root.nightOn ? Commons.Color.accent : root.bar.foreground
+              pointColor: !root.locusOn ? "transparent" : root.nightOn ? Commons.Color.accent : root.bar.foreground
             }
           }
           trailingControl: Component {
             ToggleSwitch {
-              checked: root.enabled
+              checked: root.locusOn
               foreground: root.bar.foreground
               onToggled: root.flipSwitch()
             }
@@ -245,7 +246,7 @@ Panel {
           spacing: Style.space(8)
 
           Button {
-            visible: root.enabled
+            visible: root.locusOn
             text: strings.t("hold.off")
             tooltipText: strings.t("hold.offTip")
             bordered: true
@@ -285,8 +286,8 @@ Panel {
 
           Button {
             visible: root.serviceReady && root.service.holding
-            text: root.enabled ? strings.t("hold.resume") : strings.t("hold.end")
-            tooltipText: root.enabled ? strings.t("hold.resumeTip") : strings.t("hold.endTip")
+            text: root.locusOn ? strings.t("hold.resume") : strings.t("hold.end")
+            tooltipText: root.locusOn ? strings.t("hold.resumeTip") : strings.t("hold.endTip")
             bordered: true
             selected: true
             foreground: root.bar.foreground
@@ -444,7 +445,8 @@ Panel {
 
             PanelSectionHeader {
               id: temperatureHeader
-              text: root.bedtimeNow ? strings.t("bedtime.temperatureNow") : strings.t("temperature")
+              text: root.serviceReady && root.service.movie ? strings.t("movie.temperature")
+                : root.bedtimeNow ? strings.t("bedtime.temperatureNow") : strings.t("temperature")
               foreground: root.bar.foreground
               fontFamily: root.bar.fontFamily
               anchors.left: parent.left

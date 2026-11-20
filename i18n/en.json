@@ -61,6 +61,7 @@
   "bedtime.at": "Bedtime",
   "bedtime.temperature": "Bedtime level",
   "bedtime.temperatureNow": "Bedtime temperature",
+  "movie.temperature": "Movie temperature",
   "bedtime.weekend": "Fri and Sat",
   "bedtime.later": "%1 min later",
   "bedtime.same": "Same time",

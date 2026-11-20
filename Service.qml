@@ -23,7 +23,13 @@ Item {
   id: root
 
   Component.onCompleted: Registry.service = root
-  Component.onDestruction: if (Registry.service === root) Registry.service = null
+  Component.onDestruction: {
+    if (Registry.service === root) Registry.service = null
+    // Dimming lives in hyprsunset's gamma, which nothing else resets: removing
+    // or disabling Locus at night mustn't leave the screen dim.
+    if (gammaSent !== null && gammaSent !== Model.FULL_GAMMA)
+      Quickshell.execDetached(["hyprctl", "hyprsunset", "gamma", String(Model.FULL_GAMMA)])
+  }
 
   readonly property int minTemp: Model.MIN_TEMP
   readonly property int maxTemp: Model.MAX_TEMP
@@ -162,7 +168,9 @@ Item {
     ? fadeTarget < Model.FRESH_TEMP
     : actualTemp !== null && (actualTemp < Model.FRESH_TEMP || (plan.on && !externalHold && !pausedNow))
   // Locus on or off: the panel's switch. Off does nothing until turned on.
-  readonly property bool enabled: settings.enabled
+  // Not named "enabled": that would hide Item.enabled, which Omarchy's bar
+  // code reads to decide whether something can be clicked.
+  readonly property bool locusOn: settings.enabled
   readonly property string mode: settings.mode
   readonly property int temperature: settings.temperature
   readonly property string onTime: settings.onTime
@@ -179,8 +187,11 @@ Item {
   readonly property bool movie: holding && settings.override.temperature !== undefined
   readonly property int movieTemp: Model.MOVIE_TEMP
   readonly property var presets: Model.PRESETS
-  // The temperature the slider shows and sets: the bedtime one once bedtime has come.
-  readonly property int activeTemperature: bedtimeNow ? settings.bedtimeTemperature : settings.temperature
+  // The temperature the slider shows and steps from: Movie mode's own while it
+  // lasts, the bedtime one once bedtime has come, else the saved one
+  // (Model.shownTemperature).
+  readonly property int activeTemperature: movie ? settings.override.temperature
+    : bedtimeNow ? settings.bedtimeTemperature : settings.temperature
   // The preset that temperature matches, or "".
   readonly property string preset: Model.presetName(activeTemperature)
   readonly property bool bedtime: settings.bedtime
@@ -194,7 +205,7 @@ Item {
   // Twilight fades apply in Sun mode with a location.
   readonly property bool followsTwilight: twilight && mode === "sun" && location !== null
   // Following a schedule, rather than the switch alone.
-  readonly property bool scheduled: enabled && mode !== "always" && !(mode === "sun" && location === null)
+  readonly property bool scheduled: locusOn && mode !== "always" && !(mode === "sun" && location === null)
   // "Off until morning" needs a schedule to know when morning is.
   readonly property bool canHoldUntilMorning: scheduled
 
@@ -1022,7 +1033,7 @@ Item {
     function status(): string {
       return JSON.stringify({
         on: root.nightOn,
-        enabled: root.enabled,
+        enabled: root.locusOn,
         status: root.status.kind,
         next: root.status.at ? new Date(root.status.at).toLocaleString() : "",
         temperature: root.actualTemp,
@@ -1068,7 +1079,7 @@ Item {
     // Locus on (follow the mode) or off (until turned on again); either ends any hold.
     function on(): void { root.setEnabled(true) }
     function off(): void { root.setEnabled(false) }
-    function toggle(): void { root.setEnabled(!root.enabled) }
+    function toggle(): void { root.setEnabled(!root.locusOn) }
     function set(kelvin: int): void { root.setTemperature(kelvin) }
     // Save a preset's temperature: mild, night, warm or candle.
     function preset(name: string): string { return root.setPreset(name) ? "ok" : "invalid" }

@@ -420,15 +420,20 @@ test("Movie mode works in the day and while Locus is off, and takes a length", (
   assert.deepStrictEqual(Model.splitSettings(film).settings, Model.splitSettings(manual).settings, "only the state file changes")
 })
 
-test("choosing a temperature during Movie mode shows it for the rest of the hold", () => {
+test("choosing a temperature during Movie mode changes the hold only, not the saved one", () => {
   const s = settings({ mode: "custom", onTime: "21:00", offTime: "07:00", temperature: 2000 })
   const now = at(2026, 11, 5, 21, 30)
   const film = settings(Object.assign({}, s, Model.holdPatch(s, place, now, "movie")))
+  // Steps start from what's on screen (5000K), so "cooler" goes cooler (review finding).
+  assert.strictEqual(Model.shownTemperature(film, place, now + MIN), 5000)
   const patch = Model.temperaturePatch(film, place, 2700, now + 10 * MIN)
-  assert.deepStrictEqual(patch, { temperature: 2700, override: { on: true, until: now + 150 * MIN } })
+  assert.deepStrictEqual(patch, { override: { on: true, until: now + 150 * MIN, temperature: 2700 } })
   const after = settings(Object.assign({}, film, patch))
+  assert.strictEqual(after.temperature, 2000, "tomorrow night is unchanged")
   assert.strictEqual(Model.kelvinAt(after, place, now + 11 * MIN), 2700)
   assert.strictEqual(Model.desiredState(after, place, now + 149 * MIN).until, now + 150 * MIN, "the hold keeps its end")
+  assert.strictEqual(Model.kelvinAt(after, place, now + 151 * MIN), 2000, "then the saved temperature again")
+  assert.strictEqual(Model.shownTemperature(s, place, now), 2000)
   // Any other time it saves the temperature and nothing else.
   assert.deepStrictEqual(Model.temperaturePatch(s, place, 9000, now), { temperature: Model.MAX_TEMP })
   const off = settings(Object.assign({}, s, Model.holdPatch(s, place, now, "off", 60)))
@@ -1501,4 +1506,55 @@ test("the status while off, or always warm, has no time", () => {
   assert.deepStrictEqual(Model.statusAt(warm, place, at(2026, 11, 5, 14)), { kind: "warmUntil", at: at(2026, 11, 5, 15) })
   assert.deepStrictEqual(Model.statusAt(settings({ mode: "always" }), place, at(2026, 11, 5, 14)), { kind: "warm", at: 0 })
   assert.deepStrictEqual(Model.statusAt(settings({ mode: "custom", onTime: "09:00", offTime: "09:00" }), place, at(2026, 11, 5, 14)).kind, "off", "hours that never turn on")
+})
+
+// ---- Found in review (2026-11-20) -------------------------------------------------
+
+test("twilight: a night starting after midnight uses its own evening's dusk, not the next one", () => {
+  // Every longitude, through the year, with Start up to 2 h after sunset: the
+  // warm-up is never longer than Start plus the longest twilight (or fadeIn).
+  const s = (offset) => settings({ mode: "sun", temperature: 3000, twilight: true, sunsetOffset: offset })
+  for (let lon = -180; lon < 180; lon += 15) {
+    for (const lat of [20, 40, 55]) {
+      const where = { latitude: lat, longitude: lon, source: "custom", label: "" }
+      for (let month = 1; month <= 12; month++) {
+        for (const offset of [-120, 0, 180]) {
+          const day = at(2026, month, 15, 12)
+          for (let hour = 0; hour < 24; hour += 1) {
+            const ramp = Model.rampAt(s(offset), where, day + hour * 3600000)
+            if (ramp && ramp.warming) assert.ok(ramp.lengthMs <= 5 * 3600000, `lat ${lat} lon ${lon} ${month}/15 offset ${offset}: ${ramp.lengthMs / MIN} min`)
+          }
+        }
+      }
+    }
+  }
+})
+
+test("a bedtime or dim time late in a long winter night falls in that night", () => {
+  // Custom 15:00 to 09:00, an 18-hour night: bedtime 03:30 and dimming from 04:00.
+  const s = settings({ mode: "custom", onTime: "15:00", offTime: "09:00", temperature: 3000, bedtime: true, bedtimeAt: "03:30", weekendDelay: 0, dim: true, dimFrom: "04:00" })
+  assert.strictEqual(Model.bedtimeAt(s, place, at(2026, 12, 9, 16)).start, at(2026, 12, 10, 3, 30))
+  assert.strictEqual(Model.kelvinAt(s, place, at(2026, 12, 9, 20)), 3000, "not bedtime yet at 20:00")
+  assert.strictEqual(Model.gammaAt(s, place, at(2026, 12, 9, 20)), 100, "nor dimmed")
+  assert.strictEqual(Model.dimAt(s, place, at(2026, 12, 9, 16)).start, at(2026, 12, 10, 4))
+  // Start 3 h before sunset in December with bedtime 02:00: bedtime at 02:00, not from mid-afternoon.
+  const early = settings({ mode: "sun", sunsetOffset: 180, temperature: 3000, bedtime: true, bedtimeAt: "02:00", weekendDelay: 0 })
+  const start = Model.scheduleStart(early, place, at(2026, 12, 9, 18))
+  assert.ok(Model.bedtimeAt(early, place, start + MIN).start > start + 6 * 3600000)
+  // And the earlier rules still hold: a time just before the start covers the night, one after it doesn't count.
+  const before = settings({ mode: "custom", onTime: "21:00", offTime: "07:00", bedtime: true, bedtimeAt: "20:00", weekendDelay: 0 })
+  assert.deepStrictEqual(Model.bedtimeAt(before, place, at(2026, 11, 5, 22)), { start: at(2026, 11, 5, 21), lengthMs: 0 })
+  const after = settings({ mode: "custom", onTime: "21:00", offTime: "07:00", bedtime: true, bedtimeAt: "08:00", weekendDelay: 0 })
+  assert.strictEqual(Model.bedtimeAt(after, place, at(2026, 11, 5, 22)), null)
+})
+
+test("dimming doesn't jump where a short night's warm-up and clear-down cross", () => {
+  const s = settings({ mode: "custom", onTime: "23:00", offTime: "01:00", fadeIn: 90, fadeOut: 90, temperature: 3000, dim: true, dimFrom: "23:00", dimPercent: 80 })
+  let previous = null
+  for (let t = at(2026, 11, 5, 23); t <= at(2026, 11, 6, 1); t += 20000) {
+    const gamma = Model.gammaAt(s, place, t)
+    if (previous !== null) assert.ok(Math.abs(gamma - previous) <= 1, gamma + " after " + previous + " at " + new Date(t).toTimeString())
+    previous = gamma
+  }
+  assert.strictEqual(previous, 100)
 })

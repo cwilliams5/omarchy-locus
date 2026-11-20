@@ -506,7 +506,10 @@ function followsTwilight(settings, location) {
 // the night starts after it.
 function fadeInMs(settings, location, nightStart) {
   if (followsTwilight(settings, location)) {
-    var dusk = twilightTimes(nightStart, location.latitude, location.longitude).dusk
+    // The dusk of the evening the night belongs to: a night starting after
+    // midnight (Start after a late sunset) belongs to the day before, not to
+    // the coming evening's dusk 20 hours away.
+    var dusk = twilightTimes(nightStart - 12 * 3600000, location.latitude, location.longitude).dusk
     if (Number.isFinite(dusk) && dusk > nightStart) return dusk - nightStart
   }
   return settings.fadeIn * MINUTE_MS
@@ -648,18 +651,31 @@ function nightAt(settings, location, nowMs) {
   return { start: start, end: schedule.next, evening: start - 12 * 3600000 }
 }
 
+// A clock time (minutes after midnight) placed in the night under way: its
+// first time inside the night, so 00:30 belongs to the night that started the
+// evening before and 03:30 to a 17-hour winter night that started at 15:10;
+// otherwise its last time before the night started, if that was within 12
+// hours (it has already passed, so it covers the whole night); otherwise null
+// (it falls in the day, after the night ends).
+function clockInNight(night, minute) {
+  var next = nextClock(night.start - 1, minute)
+  if (next < night.end) return next
+  var previous = localAt(next, -1, minute)
+  return night.start - previous <= 12 * 3600000 ? previous : null
+}
+
 // Bedtime in the night under way: when its fade starts and how long it takes
-// (0 for at once, as with Gradual off). The bedtime is the clock time nearest
-// the night's start, within 12 hours either way, so 00:30 belongs to the night
-// that started the evening before; one already past when the night starts
-// covers the whole night. Nights starting on a Friday or Saturday evening
-// move it weekendDelay minutes later. Null when there's none: bedtime off, no
-// schedule, the night light held off, or bedtime falling after the night ends.
+// (0 for at once, as with Gradual off). The time is placed in the night by
+// clockInNight; one already past when the night starts covers the whole night.
+// Nights starting on a Friday or Saturday evening move it weekendDelay minutes
+// later. Null when there's none: bedtime off, no schedule, the night light
+// held off, or bedtime falling after the night ends.
 function bedtimeAt(settings, location, nowMs) {
   if (!settings.bedtime) return null
   var night = nightAt(settings, location, nowMs)
   if (!night) return null
-  var at = nextClock(night.evening, parseTime(settings.bedtimeAt))
+  var at = clockInNight(night, parseTime(settings.bedtimeAt))
+  if (at === null) return null
   var weekday = new Date(night.evening).getDay()
   if (weekday === 5 || weekday === 6) at += settings.weekendDelay * MINUTE_MS
   if (at >= night.end) return null
@@ -674,9 +690,23 @@ function dimAt(settings, location, nowMs) {
   if (!settings.dim || movieKelvin(settings, nowMs) !== null) return null
   var night = nightAt(settings, location, nowMs)
   if (!night) return null
-  var at = nextClock(night.evening, parseTime(settings.dimFrom))
-  if (at >= night.end) return null
+  var at = clockInNight(night, parseTime(settings.dimFrom))
+  if (at === null) return null
   return { start: Math.max(at, night.start), easeMs: settings.ramp ? DIM_EASE_MS : 0 }
+}
+
+// How much of the night's tint the morning's clear-down has left: 1 before it,
+// falling to 0 as the night ends. Worked out on its own rather than from
+// rampAt, which on a short night switches from the warm-up to the clear-down
+// halfway and would make dimming jump. 1 when there's no clear-down.
+function clearDownShare(settings, location, nowMs) {
+  if (!settings.ramp || noSchedule(settings, location)) return 1
+  if (settings.override && nowMs < settings.override.until) return 1
+  var schedule = scheduleAt(settings, location, nowMs)
+  if (!schedule.on) return 1
+  var outMs = fadeOutMs(settings, location, schedule.next)
+  if (!(outMs > 0)) return 1
+  return Math.max(0, Math.min(1, (schedule.next - nowMs) / outMs))
 }
 
 // How far below full brightness dimming is now, in percent, unrounded: easing
@@ -685,9 +715,7 @@ function dimDepth(settings, location, nowMs) {
   var dim = dimAt(settings, location, nowMs)
   if (!dim || nowMs < dim.start) return 0
   var depth = (FULL_GAMMA - settings.dimPercent) * (dim.easeMs > 0 ? Math.min(1, (nowMs - dim.start) / dim.easeMs) : 1)
-  var ramp = rampAt(settings, location, nowMs)
-  if (ramp && !ramp.warming) depth *= ramp.progress
-  return depth
+  return depth * clearDownShare(settings, location, nowMs)
 }
 
 // The gamma hyprsunset should have now, a whole percent. Full brightness
@@ -704,10 +732,12 @@ function gammaStepMs(settings, location, nowMs) {
   if (!dim || nowMs < dim.start) return null
   var full = FULL_GAMMA - settings.dimPercent
   if (full <= 0) return null
-  var ramp = rampAt(settings, location, nowMs)
   var lengths = []
   if (dim.easeMs > 0 && nowMs < dim.start + dim.easeMs) lengths.push(dim.easeMs)
-  if (ramp && !ramp.warming) lengths.push(ramp.lengthMs)
+  if (clearDownShare(settings, location, nowMs) < 1) {
+    var schedule = scheduleAt(settings, location, nowMs)
+    lengths.push(fadeOutMs(settings, location, schedule.next))
+  }
   if (lengths.length === 0) return null
   // Easing in and clearing down at once (a short night) adds the two rates.
   var rate = 0
@@ -1021,14 +1051,25 @@ function holdPatch(settings, location, nowMs, kind, minutes) {
   return { override: { on: kind === "on", until: nowMs + length * MINUTE_MS } }
 }
 
-// Saving the temperature the screen is showing: the bedtime one once bedtime
-// has come, otherwise the evening one. During Movie mode it also drops the
-// hold's own temperature, so the one just chosen shows for the rest of the hold.
+// Choosing a temperature: during Movie mode it changes the hold's own
+// temperature, for the rest of the hold, and saves nothing (a tweak for one
+// film shouldn't change tomorrow night). Otherwise it saves the temperature
+// showing: the bedtime one once bedtime has come, else the evening one.
 function temperaturePatch(settings, location, kelvin, nowMs) {
+  var clamped = clampTemp(kelvin)
+  if (movieKelvin(settings, nowMs) !== null)
+    return { override: { on: true, until: settings.override.until, temperature: clamped } }
   var patch = {}
-  patch[bedtimeReached(settings, location, nowMs) ? "bedtimeTemperature" : "temperature"] = clampTemp(kelvin)
-  if (movieKelvin(settings, nowMs) !== null) patch.override = { on: true, until: settings.override.until }
+  patch[bedtimeReached(settings, location, nowMs) ? "bedtimeTemperature" : "temperature"] = clamped
   return patch
+}
+
+// The temperature the slider, presets and steps start from: Movie mode's own
+// while it lasts, the bedtime one once bedtime has come, else the saved one.
+function shownTemperature(settings, location, nowMs) {
+  var movie = movieKelvin(settings, nowMs)
+  if (movie !== null) return movie
+  return bedtimeReached(settings, location, nowMs) ? settings.bedtimeTemperature : settings.temperature
 }
 
 // A preset's temperature by name, or null.
@@ -1188,6 +1229,7 @@ if (typeof module !== "undefined") {
     gammaStepMs: gammaStepMs,
     presetKelvin: presetKelvin,
     temperaturePatch: temperaturePatch,
+    shownTemperature: shownTemperature,
     presetName: presetName,
     PRESETS: PRESETS,
     MOVIE_TEMP: MOVIE_TEMP,

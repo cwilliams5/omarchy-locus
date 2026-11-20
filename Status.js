@@ -22,5 +22,5 @@ function line(service, t, clock) {
 function tooltip(service, t, clock, kelvin) {
   var text = line(service, t, clock)
   if (service && service.nightOn) text = t("tooltip.withKelvin").arg(text).arg(kelvin)
-  return (service && service.enabled ? t("tooltip.turnOff") : t("tooltip.turnOn")).arg(text)
+  return (service && service.locusOn ? t("tooltip.turnOff") : t("tooltip.turnOn")).arg(text)
 }
