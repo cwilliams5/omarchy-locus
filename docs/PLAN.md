@@ -24,7 +24,7 @@ in the same commit as the work.
 
 - **2026-11-19, end of session 1:** A1, A2, B1 done, merged, pushed, tested
   live; the installed copy is on `main`; dotfiles updated.
-- **2026-11-19, session 2:** B2 to B7 done. **Next: B8** (needs Cody's yes or no first: see "Decisions waiting on Cody").
+- **2026-11-19, session 2:** B2 to B7 and B9 done; B8 held for Cody. **Next: B10.**
 - Cody's live Locus state at that point: Sun mode, 3000K, and a hold "off
   until morning" (ends at sunrise, 6:30 AM on 2026-11-20). If a test changes
   the hold at night, put it back with
@@ -70,8 +70,8 @@ Phase B, features that cost nothing to run:
 - [x] B5. The Arc mark as the bar icon (tested live: bar off and on, the panel header; the vertical bar not tried, the icon is centred by Omarchy's own bounds code)
 - [x] B6. A 24-hour view of the night in the panel (tested live: with bedtime and dimming, and with a hold)
 - [x] B7. Fades that follow twilight (option) (4578241, tested live: the lengths for Los Angeles tonight, 27 min each, and the panel rows)
-- [ ] B8. Daytime tint (off by default)
-- [ ] B9. Location by city name
+- [ ] B8. Daytime tint (off by default): **held for Cody** (see "Decisions waiting on Cody")
+- [x] B9. Location by city name (74f87f4, tested live: Berlin found and shown, a miss, a typo, back to automatic)
 - [ ] B10. Run a command at sunset and sunrise
 
 Phase C, heavier, each behind a toggle, only if Cody wants them:
@@ -379,7 +379,15 @@ dark theme at night. Credit f.lux (dark mode at sunset) and Redshift's hooks.
 - ~~B3 default bedtime, bedtime temperature, weekend delay.~~ **Settled:**
   proposed defaults stand (bedtime off by default, 22:30, 2200K, 60 min later
   on Friday and Saturday nights).
-- B8 whether daytime tint is wanted at all.
+- **B8 whether daytime tint is wanted at all.** Found while starting it: a
+  day level under 6000K crosses the line Locus, Omarchy's Night Light icon
+  and `omarchy toggle nightlight` all read as "on", so Omarchy's icon would
+  show the night light on all day and its toggle would switch the day tint
+  off (Locus would take that as a hold until sunset). Building it also means
+  every fade mixes from a day level instead of neutral (rampAt, fadeStepMs,
+  the 24-hour view) and "on" in the service compares against that level.
+  Recommendation: skip it unless Cody wants it; the bedtime level covers the
+  "warmer later" need, and nothing else asks for a daytime tint.
 - Phase C: which, if any.
 - Housekeeping, optional: hide Omarchy's own Night Light icon so there's one
   control (`omarchy.indicators` `items`, then re-add `shell.json`).
