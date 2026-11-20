@@ -87,8 +87,8 @@ Phase C, heavier, each behind a toggle: **none wanted for now** (Cody, 2026-11-2
 
 Phase D, back to go-public:
 
-- [ ] D1. README and media (go-public stage 4), then publish (5), marketplace (6): **stage 4 done 2026-11-20** (README, media, every command and link checked, install test from a file URL); stages 5 and 6 prepared, waiting for Cody's go (public, release, marketplace issue)
-- [ ] D2. Point the old fork's README at Locus once Locus is public
+- [x] D1. README and media (go-public stage 4), then publish (5), marketplace (6): **all done 2026-11-20** (public, v2.0.0, marketplace #15493). Stage 4 done 2026-11-20 (README, media, every command and link checked, install test from a file URL); stages 5 and 6 prepared, waiting for Cody's go (public, release, marketplace issue)
+- [x] D2. Point the old fork's README at Locus once Locus is public (936e08e)
 
 ## Working procedure (the exact steps used for A1 to B1)
 
@@ -442,6 +442,8 @@ selling point, with a battery section in the README).
 - [x] Pronouns in the repo: Cody he/him (keep), William John Davis III they/them; code comments generic
 - [x] Tests (3 time zones), live test (deep red + `hyprctl reload`, deep red across a shell restart, hyprsunset stopped (no processes) and restarted, teardown on a plugin reload). Known for 2.1: a slider preview in the first seconds after a shell start can be undone by the start-up check.
 - [x] Privacy scan; marketplace scanner (`scratchpad/driver/run-baseline.mjs` if still there)
-- [ ] Lock 2.0.0, make public, install test from the public URL, release (notes approved),
+- [x] Lock 2.0.0, make public, install test from the public URL, release (notes approved),
       marketplace issue (approved; maintainer notes updated for the socket and fork), old fork notice
+      (2026-11-20: public; v2.0.0 at e590349; install test PASS from the public URL;
+      omacom/omarchy-plugin-marketplace#15493; old fork 936e08e)
 - [ ] Remind Cody: upload media/social-preview.png in Settings
