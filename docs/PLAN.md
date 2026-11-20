@@ -47,8 +47,8 @@ in the same commit as the work.
 
 Phase A, foundation:
 
-- [ ] A1. Settings in Omarchy's settings panel (`shell.json`), state in `locus.json`
-- [ ] A2. Finer rounding for very warm fades
+- [ ] A1. Settings in Omarchy's settings panel (`shell.json`), state in `locus.json`. **On hold: no plugin settings GUI exists; Cody to choose (a), (b) or (c), see A1.**
+- [x] A2. Finer rounding for very warm fades (5be21b1, tested live)
 
 Phase B, features that cost nothing to run:
 
@@ -99,7 +99,28 @@ Cody also gets them in Omarchy's own settings panel, and in his dotfiles
   with a FileView and finds its entry; check first whether `shell.shellConfig`
   is reachable from the service (it would be a live binding, no file reads).
 
-**Design:**
+**Found on 2026-11-19, changes the premise (decision pending with Cody):**
+- **There is no settings GUI for plugins**, in Omarchy 4.5.0 or in current
+  upstream `omacom/omarchy` (code search). The registry keeps each widget's
+  `schema` and `settingsForm`, but nothing renders them: they look reserved
+  for a future UI. Dusk's README mentions "Shell Settings"; not found.
+- What does exist: `omarchy bar set <id> <key> <value> [--json]` and
+  `omarchy bar get <id> <key>` (they write the bar entry without checking the
+  schema), and Cody's dotfiles already track `shell.json`.
+- **The service can't rely on `shell.barConfig`:** a plugin service's copy is
+  refreshed only when plugins or bar widgets change (`syncPluginApis`), not
+  when a setting changes. So option (a) below must watch `shell.json` with a
+  FileView (as Dusk does) and write through `shell.updateEntryInline`.
+- Options put to Cody:
+  - **(a) shell.json as designed below:** Omarchy-native, `omarchy bar set`
+    works, captured by the dotfiles, ready if Omarchy ships a settings UI.
+    Medium work; settings live only while the widget's entry exists.
+  - **(b) Split files:** `locus.json` keeps settings only (tracked by the
+    dotfiles as a private file), state moves to `locus-state.json`. Simpler,
+    independent of Omarchy's internals; a later move to (a) would migrate again.
+  - **(c) Skip for now,** revisit if Omarchy ships a settings UI.
+
+**Design (option a):**
 - **Settings** (user choices, in `shell.json`, tracked by Cody's dotfiles):
   `mode, temperature, onTime, offTime, ramp, fadeIn, fadeOut, sunsetOffset,
   pauseFullscreen, pauseApps` (a comma-separated string in the schema),

@@ -180,8 +180,10 @@ Quickshell 0.3.2.
 - Status: `omarchy-shell io.github.cwilliams5.locus.control status` (includes
   `nextCheckSeconds`, `paused`, `frontApp`).
 - The shell log: `/run/user/$UID/quickshell/by-pid/<pid>/log.log`, pid from
-  `pgrep -f 'quickshell -n -p /usr/share/omarchy/shell'`. Locus logs as
-  `locus: ...`.
+  `pgrep -f 'quickshell -n -p /usr/share/omarchy/shell'`. Right after
+  `omarchy restart shell` the pid can still change; the newest folder
+  (`ls -t /run/user/$UID/quickshell/by-pid | head -1`) is safer. Locus logs
+  as `locus: ...`.
 - Before testing anything visible, save the user's settings with the status
   command and restore them through IPC afterwards, never by rewriting the
   file (rule 7).
