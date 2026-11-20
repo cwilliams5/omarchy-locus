@@ -41,6 +41,8 @@ Under the slider, **Mild**, **Night**, **Warm** and **Candle** set 4500K, 3400K,
 
 **Warmer from bedtime** adds a second, warmer level later in the night, in Sun and Custom modes. From **Bedtime** (22:30 unless you change it), the screen moves to the **Bedtime level** (2200K) over the warm-up length, or at once with Gradual off. Nights that start on a Friday or Saturday reach bedtime later (**Fri and Sat nights**, an hour unless you change it). A bedtime after midnight counts for the night before it, and one that has already passed when the night starts covers the whole night. Once bedtime has come, the slider, the presets and scrolling on the icon change the bedtime level.
 
+**Dimmer late at night** turns brightness down past what the screen's own controls reach, through `hyprsunset`'s gamma, in Sun and Custom modes. From **From** (23:30 unless you change it) it eases down to **Brightness** (80%) over 15 minutes, or at once with Gradual off, and comes back up with the morning's clear-down. It stays at full brightness while an app has the night light paused, during a hold that turns it off, and in Movie mode. Both bedtime and dimming are off until you turn them on.
+
 `hyprsunset` stops at 1000K, and on some screens that is more orange than red. Below 1000K, Locus leaves `hyprsunset` there and adds a Hyprland screen shader that takes away more green and blue, until 500K shows only red. A screen shader you already use, like a grayscale one, keeps working underneath. The shader goes away on a config reload and comes back within a minute.
 
 `omarchy toggle nightlight` still works. It uses Omarchy's fixed 4000K, and that stays until the next scheduled change, even during a gradual change.
@@ -93,6 +95,8 @@ omarchy-shell $ID movie                 # 5000K for 2.5 hours; or hold movie 100
 omarchy-shell $ID bedtime on            # Or off, or a time: bedtime 22:30
 omarchy-shell $ID bedtimetemp 2200      # The bedtime level
 omarchy-shell $ID weekend 60            # Bedtime this much later on Friday and Saturday nights
+omarchy-shell $ID dim on                # Or off, or the time it starts: dim 23:30
+omarchy-shell $ID dimlevel 80           # Brightness at its dimmest, 50 to 100 percent
 omarchy-shell $ID morning               # Off for the rest of the night
 omarchy-shell $ID resume                # End any hold
 omarchy-shell $ID offset 30             # Sun mode starts 30 min before sunset; negative is after
@@ -149,9 +153,10 @@ Locus is a hard fork of [Sundown](https://github.com/WilliamJohnDavisIII/omarchy
 
 Ideas, not code, from:
 
-- [Dusk](https://github.com/ReidenXerx/omarchy-dusk) by ReidenXerx (MIT): starting before sunset; a fade length you choose; stepping aside for fullscreen apps and apps you name, with a button for the app in front; spacing fade steps by what the eye can tell apart (a few mireds) and looking about once a minute; reading `hyprsunset.conf`'s own switch times so they aren't taken for you; "off until morning" and "warm for an hour".
+- [Dusk](https://github.com/ReidenXerx/omarchy-dusk) by ReidenXerx (MIT): starting before sunset; a fade length you choose; stepping aside for fullscreen apps and apps you name, with a button for the app in front; spacing fade steps by what the eye can tell apart (a few mireds) and looking about once a minute; reading `hyprsunset.conf`'s own switch times so they aren't taken for you; "off until morning" and "warm for an hour"; dimming late at night, below the screen's own minimum, eased in.
 - [f.lux](https://justgetflux.com): the night light the rest descend from, including disabling for fullscreen apps, for the app in front, and for an hour; Movie mode; named colour presets like Candle; a warmer bedtime, and sleeping in at weekends.
 - [Sunset Night Light](https://github.com/agkrishnendu/omarchy-nightlight) by agkrishnendu: a second, warmer temperature later in the evening.
+- [Moonshine](https://github.com/tiagoabiramia/omarchy-moonshine) by Tiago Abi-Ramia: software dimming for Omarchy.
 - [Night Light](https://github.com/key-tone/omarchy-nightlight) by Kenny Keeton: pausing for an hour, or until sunrise; one-click presets, including Night at 3400K and Candle at 1900K.
 
 ## License

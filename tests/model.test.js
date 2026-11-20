@@ -1143,3 +1143,109 @@ test("nothing due is ever in the past, with bedtime too", () => {
     }
   }
 })
+
+// ---- Late-night dimming -------------------------------------------------------------
+
+const dimNight = (patch) => settings(Object.assign({ mode: "custom", onTime: "21:00", offTime: "07:00", temperature: 3000,
+  dim: true, dimFrom: "23:30", dimPercent: 80, fadeIn: 60, fadeOut: 30 }, patch))
+
+// Checks as the service makes them, recording each change of gamma.
+function simulateGamma(s, location, from, to) {
+  let now = from
+  let last = null
+  const checks = []
+  const changes = []
+  while (now < to) {
+    checks.push(now)
+    const gamma = Model.gammaAt(s, location, now)
+    if (gamma !== last) {
+      changes.push({ at: now, from: last, to: gamma })
+      last = gamma
+    }
+    const due = Model.nextDueAt(s, location, now, [])
+    now += Math.max(1000, Math.min(due === null ? Model.CHECK_MS : due - now + 250, Model.CHECK_MS))
+  }
+  return { checks, changes, last }
+}
+
+test("dimming is off by default and leaves gamma alone", () => {
+  const s = settings({ mode: "custom", onTime: "21:00", offTime: "07:00" })
+  assert.deepStrictEqual([s.dim, s.dimFrom, s.dimPercent], [false, "23:30", 80])
+  for (let hour = 0; hour < 24; hour++) assert.strictEqual(Model.gammaAt(s, place, at(2026, 11, 5, hour, 45)), Model.FULL_GAMMA)
+})
+
+test("dimming settings are checked and clamped field by field", () => {
+  const s = settings({ dim: 1, dimFrom: "noon", dimPercent: 10 })
+  assert.deepStrictEqual([s.dim, s.dimFrom, s.dimPercent], [false, "23:30", Model.MIN_DIM_PERCENT])
+  assert.strictEqual(settings({ dimPercent: 150 }).dimPercent, Model.FULL_GAMMA)
+})
+
+test("dimming eases in from its time and out with the clear-down", () => {
+  const s = dimNight()
+  assert.strictEqual(Model.gammaAt(s, place, at(2026, 11, 5, 23, 29)), 100)
+  assert.strictEqual(Model.nextDueAt(s, place, at(2026, 11, 5, 23, 20), []), at(2026, 11, 5, 23, 30), "a check when it starts")
+  assert.strictEqual(Model.gammaAt(s, place, at(2026, 11, 5, 23, 30)), 100)
+  assert.strictEqual(Model.gammaAt(s, place, at(2026, 11, 5, 23, 37) + 30000), 90, "halfway through 15 minutes")
+  assert.strictEqual(Model.gammaAt(s, place, at(2026, 11, 5, 23, 45)), 80)
+  assert.strictEqual(Model.gammaAt(s, place, at(2026, 11, 6, 3)), 80)
+  assert.strictEqual(Model.gammaAt(s, place, at(2026, 11, 6, 6, 45)), 90, "halfway through the clear-down")
+  assert.strictEqual(Model.gammaAt(s, place, at(2026, 11, 6, 7)), 100)
+  assert.strictEqual(Model.gammaAt(s, place, at(2026, 11, 6, 12)), 100)
+})
+
+test("dimming eases a percent at a time and adds checks only while it moves", () => {
+  const s = dimNight()
+  const night = simulateGamma(s, place, at(2026, 11, 5, 12), at(2026, 11, 6, 12))
+  for (const x of night.changes.slice(1)) assert.ok(Math.abs(x.to - x.from) <= 1, "a jump of " + (x.to - x.from) + "% at " + new Date(x.at))
+  assert.strictEqual(night.last, 100)
+  const plain = simulate(settings(Object.assign({}, s, { dim: false })), place, at(2026, 11, 5, 12), at(2026, 11, 6, 12))
+  const extra = night.checks.length - plain.checks.length
+  assert.ok(extra >= 0 && extra <= 25, extra + " extra checks a day")
+  const steady = (run) => run.checks.filter((t) => t >= at(2026, 11, 6, 0) && t < at(2026, 11, 6, 6)).length
+  assert.strictEqual(steady(night), steady(plain), "none once it's dimmed")
+})
+
+test("dimming at once with Gradual off, and from the start when its time has passed", () => {
+  const instant = dimNight({ ramp: false })
+  assert.strictEqual(Model.gammaAt(instant, place, at(2026, 11, 5, 23, 30)), 80)
+  assert.strictEqual(Model.gammaAt(instant, place, at(2026, 11, 6, 6, 59)), 80)
+  assert.strictEqual(Model.gammaAt(instant, place, at(2026, 11, 6, 7)), 100)
+  const early = dimNight({ dimFrom: "20:00" })
+  assert.strictEqual(Model.dimAt(early, place, at(2026, 11, 5, 21, 5)).start, at(2026, 11, 5, 21))
+  assert.strictEqual(Model.gammaAt(early, place, at(2026, 11, 5, 21, 15)), 80)
+  const late = dimNight({ dimFrom: "01:00" })
+  assert.strictEqual(Model.dimAt(late, place, at(2026, 11, 5, 22)).start, at(2026, 11, 6, 1))
+  assert.strictEqual(Model.dimAt(dimNight({ onTime: "18:00", offTime: "23:00" }), place, at(2026, 11, 5, 22)), null, "after the night ends")
+})
+
+test("dimming needs the night light on: not off, paused, in Manual mode or in Movie mode", () => {
+  const s = dimNight()
+  const deep = at(2026, 11, 6, 2)
+  assert.strictEqual(Model.gammaAt(s, place, deep, true), 100, "a paused app gets full brightness")
+  const off = settings(Object.assign({}, s, Model.holdPatch(s, place, at(2026, 11, 6, 1), "off", 120)))
+  assert.strictEqual(Model.gammaAt(off, place, deep), 100)
+  const warm = settings(Object.assign({}, s, Model.holdPatch(s, place, at(2026, 11, 6, 1), "on", 120)))
+  assert.strictEqual(Model.gammaAt(warm, place, deep), 80, "a warm hold keeps it")
+  const film = settings(Object.assign({}, s, Model.holdPatch(s, place, at(2026, 11, 6, 1), "movie")))
+  assert.strictEqual(Model.gammaAt(film, place, deep), 100)
+  assert.strictEqual(Model.gammaAt(dimNight({ mode: "manual", manualOn: true }), place, deep), 100)
+})
+
+test("a short night eases in and clears down without a jump", () => {
+  const s = dimNight({ onTime: "23:00", offTime: "23:50", fadeOut: 30 })
+  const run = simulateGamma(s, place, at(2026, 11, 5, 22, 50), at(2026, 11, 6, 0))
+  for (const x of run.changes.slice(1)) assert.ok(Math.abs(x.to - x.from) <= 1, (x.from + " to " + x.to))
+  assert.strictEqual(run.last, 100)
+})
+
+test("nothing due is ever in the past, with dimming too", () => {
+  const all = [dimNight(), dimNight({ ramp: false, dimFrom: "01:00" }), dimNight({ mode: "sun", dimFrom: "16:00" }),
+    dimNight({ bedtime: true, dimFrom: "22:30" }), dimNight({ dimPercent: 100 })]
+  for (const s of all) {
+    for (let minute = 0; minute < 2880; minute += 7) {
+      const now = at(2026, 11, 5, 0, minute) + 1234
+      const due = Model.nextDueAt(s, place, now, [420])
+      assert.ok(due !== null && due > now, s.mode + " " + s.dimFrom + " at minute " + minute)
+    }
+  }
+})

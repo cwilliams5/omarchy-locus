@@ -107,6 +107,15 @@ Item {
   property int shaderRunStep: 0
   readonly property string shaderScript: String(Qt.resolvedUrl("warm-shader.sh")).replace(/^file:\/\//, "")
 
+  // Late-night dimming: the gamma last set (a whole percent), or null when not
+  // known. Nothing else in Omarchy sets gamma, so it isn't read back on every
+  // check; a restarted hyprsunset starts at 100, and a hyprsunset.conf switch
+  // sets its own, so those reset it. Sent only when the wanted value changes.
+  property var gammaSent: null
+  property int gammaRunValue: 100
+  property bool gammaQueued: false
+  property var fadeGammaFrom: null
+
   // hyprsunset.conf's own switch times (Omarchy's goes neutral at 07:00), so a
   // change they make is put right promptly instead of taken for a hand.
   property var profiles: ({ minutes: [], values: [] })
@@ -163,6 +172,9 @@ Item {
   readonly property string bedtimeAt: settings.bedtimeAt
   readonly property int bedtimeTemperature: settings.bedtimeTemperature
   readonly property int weekendDelay: settings.weekendDelay
+  readonly property bool dim: settings.dim
+  readonly property string dimFrom: settings.dimFrom
+  readonly property int dimPercent: settings.dimPercent
   // "Off until morning" needs a schedule to know when morning is.
   readonly property bool canHoldUntilMorning: mode !== "manual" && !(mode === "sun" && location === null)
 
@@ -337,6 +349,19 @@ Item {
     setWeekendDelay(weekendDelay + deltaMinutes)
   }
 
+  function setDim(enabled) {
+    updateSettings({ dim: enabled === true })
+  }
+
+  // How bright the screen gets at its dimmest, 50 to 100 percent.
+  function setDimPercent(percent) {
+    updateSettings({ dimPercent: Number(percent) })
+  }
+
+  function stepDimPercent(delta) {
+    setDimPercent(dimPercent + delta)
+  }
+
   // Minutes before sunset that Sun mode turns on; negative is after it.
   function setSunsetOffset(minutes) {
     updateSettings({ sunsetOffset: Number(minutes) })
@@ -402,6 +427,7 @@ Item {
     fadeFrom = actualTemp
     fadeTarget = kelvin
     fadeStart = Date.now()
+    fadeGammaFrom = gammaSent
     fadeTimer.start()
   }
 
@@ -409,6 +435,33 @@ Item {
     var progress = (Date.now() - fadeStart) / Model.FADE_MS
     if (progress >= 1) fadeTimer.stop()
     apply(Model.mixKelvin(fadeFrom, fadeTarget, progress))
+    syncGamma()
+  }
+
+  // Full brightness while something else holds the temperature; during the
+  // switch's two-second fade, part way from where it was.
+  function wantedGamma() {
+    if (externalHold) return Model.FULL_GAMMA
+    var target = Model.gammaAt(settings, location, Date.now(), pausedNow)
+    if (fadeTimer.running && fadeGammaFrom !== null) {
+      var progress = Math.min(1, (Date.now() - fadeStart) / Model.FADE_MS)
+      return Math.round(fadeGammaFrom + (target - fadeGammaFrom) * progress)
+    }
+    return target
+  }
+
+  function syncGamma() {
+    // A hyprsunset that isn't running has nothing to set, and starts at 100.
+    if (actualTemp === null) return
+    var want = wantedGamma()
+    if (want === gammaSent) return
+    if (gammaProcess.running) {
+      gammaQueued = true
+      return
+    }
+    gammaRunValue = want
+    gammaProcess.command = ["hyprctl", "hyprsunset", "gamma", String(want)]
+    gammaProcess.running = true
   }
 
   function tick() {
@@ -466,6 +519,7 @@ Item {
       if (jump) fadeTo(level)
       else apply(level)
     }
+    syncGamma()
   }
 
   // Sleep until the next thing is due, and never longer than a minute, so a
@@ -538,10 +592,15 @@ Item {
     lastLookAt = now
     // hyprsunset can carry out its own switch up to a minute late, so for two
     // minutes a reading one of its profiles would leave counts as that switch.
-    if (profileSwitched) profileGraceUntil = now + 120000
+    // A switch also sets the profile's gamma.
+    if (profileSwitched) {
+      profileGraceUntil = now + 120000
+      gammaSent = null
+    }
 
     if (reported === null) {
       actualTemp = null
+      gammaSent = Model.FULL_GAMMA
       if (currentLevel() !== Model.OFF_TEMP || previewing) {
         // Not running, and needed. Starting it only when needed keeps days free of it.
         if (now - lastStartAttempt > 10000) {
@@ -569,10 +628,13 @@ Item {
     if (reported === Model.FRESH_TEMP) {
       // hyprsunset just restarted, or an identity profile in hyprsunset.conf
       // (Omarchy's 07:00 one) cleared it: either way, put the schedule back.
+      // Both leave gamma at full brightness.
       fadeTimer.stop()
       externalHold = false
+      gammaSent = Model.FULL_GAMMA
       lastLevel = currentLevel()
       apply(lastLevel)
+      syncGamma()
       return
     }
     if (!applySettled && reported === applyTarget) {
@@ -588,6 +650,7 @@ Item {
         externalHold = false
         lastLevel = currentLevel()
         apply(lastLevel)
+        syncGamma()
         return
       }
       externalHold = true
@@ -774,6 +837,17 @@ Item {
   }
 
   Process {
+    id: gammaProcess
+    onExited: function(exitCode) {
+      // A failed run is tried again at the next check.
+      root.gammaSent = exitCode === 0 ? root.gammaRunValue : null
+      if (!root.gammaQueued) return
+      root.gammaQueued = false
+      root.syncGamma()
+    }
+  }
+
+  Process {
     id: probeProcess
     command: ["hyprctl", "hyprsunset", "temperature"]
     stdout: StdioCollector {
@@ -878,6 +952,10 @@ Item {
         bedtimeTemperature: root.bedtimeTemperature,
         weekendDelay: root.weekendDelay,
         bedtimeNow: root.bedtimeNow,
+        dim: root.dim,
+        dimFrom: root.dimFrom,
+        dimPercent: root.dimPercent,
+        gamma: root.gammaSent,
         sunsetOffset: root.sunsetOffset,
         fadeIn: root.fadeIn,
         fadeOut: root.fadeOut,
@@ -906,6 +984,18 @@ Item {
       return "ok"
     }
     function bedtimetemp(kelvin: int): void { root.setBedtimeTemperature(kelvin) }
+    // Dimmer late at night: on, off, or the time it starts (23:30).
+    function dim(value: string): string {
+      if (value === "on" || value === "off") {
+        root.setDim(value === "on")
+        return "ok"
+      }
+      if (Model.parseTime(value) === null) return "invalid"
+      root.setTime("dimFrom", value)
+      return "ok"
+    }
+    // How bright at the dimmest, 50 to 100 percent.
+    function dimlevel(percent: int): void { root.setDimPercent(percent) }
     // Minutes later on Friday and Saturday nights, 0 to 180.
     function weekend(minutes: int): void { root.setWeekendDelay(minutes) }
     // Milder (5000K) for two and a half hours, then back to the schedule.

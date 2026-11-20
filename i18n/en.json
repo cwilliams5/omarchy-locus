@@ -58,5 +58,9 @@
   "bedtime.temperatureNow": "Bedtime temperature",
   "bedtime.weekend": "Fri and Sat nights",
   "bedtime.later": "%1 min later",
-  "bedtime.same": "Same time"
+  "bedtime.same": "Same time",
+  "dim.level": "Dimmer late at night",
+  "dim.from": "From",
+  "dim.percent": "Brightness",
+  "percent": "%1%"
 }

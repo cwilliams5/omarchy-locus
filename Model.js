@@ -41,6 +41,10 @@ var PRESETS = [
 var MOVIE_TEMP = 5000
 var MOVIE_MINUTES = 150
 var MAX_WEEKEND_DELAY = 180
+// Late-night dimming through hyprsunset's gamma, in percent of full brightness.
+var FULL_GAMMA = 100
+var MIN_DIM_PERCENT = 50
+var DIM_EASE_MS = 15 * MINUTE_MS
 var PAUSE_APPS_MAX = 32
 var APP_NAME_MAX = 64
 
@@ -75,7 +79,11 @@ function defaultSettings() {
     bedtime: false,
     bedtimeAt: "22:30",
     bedtimeTemperature: 2200,
-    weekendDelay: 60 // Minutes later when the night starts on a Friday or Saturday
+    weekendDelay: 60, // Minutes later when the night starts on a Friday or Saturday
+    // Dimmer late at night, below what the screen's own brightness goes down to.
+    dim: false,
+    dimFrom: "23:30",
+    dimPercent: 80
   }
 }
 
@@ -86,7 +94,8 @@ function defaultSettings() {
 // enforces it, so a new setting can't be added without picking one.
 var SETTING_KEYS = ["mode", "temperature", "onTime", "offTime", "ramp", "fadeIn", "fadeOut",
                     "sunsetOffset", "pauseFullscreen", "pauseApps", "autoLocation",
-                    "bedtime", "bedtimeAt", "bedtimeTemperature", "weekendDelay"]
+                    "bedtime", "bedtimeAt", "bedtimeTemperature", "weekendDelay",
+                    "dim", "dimFrom", "dimPercent"]
 var STATE_KEYS = ["manualOn", "override", "rampSkipUntil", "latitude", "longitude", "detected"]
 
 function pickKeys(object, keys) {
@@ -259,6 +268,9 @@ function normalizeSettings(raw) {
   if (parseTime(raw.bedtimeAt) !== null) result.bedtimeAt = formatTime(parseTime(raw.bedtimeAt))
   if (Number.isFinite(raw.bedtimeTemperature)) result.bedtimeTemperature = clampTemp(raw.bedtimeTemperature)
   if (Number.isFinite(raw.weekendDelay)) result.weekendDelay = clampInt(raw.weekendDelay, 0, MAX_WEEKEND_DELAY)
+  if (typeof raw.dim === "boolean") result.dim = raw.dim
+  if (parseTime(raw.dimFrom) !== null) result.dimFrom = formatTime(parseTime(raw.dimFrom))
+  if (Number.isFinite(raw.dimPercent)) result.dimPercent = clampInt(raw.dimPercent, MIN_DIM_PERCENT, FULL_GAMMA)
   return result
 }
 
@@ -490,6 +502,18 @@ function movieKelvin(settings, nowMs) {
   return null
 }
 
+// The night under way, if the schedule (and no hold off) has the night light on:
+// its start and end, and the evening it belongs to, for placing clock times
+// like bedtime in it. Null otherwise, and in Manual mode.
+function nightAt(settings, location, nowMs) {
+  if (followsSwitch(settings, location)) return null
+  if (!desiredState(settings, location, nowMs).on) return null
+  var schedule = scheduleAt(settings, location, nowMs)
+  if (!schedule.on) return null
+  var start = scheduleStart(settings, location, nowMs)
+  return { start: start, end: schedule.next, evening: start - 12 * 3600000 }
+}
+
 // Bedtime in the night under way: when its fade starts and how long it takes
 // (0 for at once, as with Gradual off). The bedtime is the clock time nearest
 // the night's start, within 12 hours either way, so 00:30 belongs to the night
@@ -498,18 +522,63 @@ function movieKelvin(settings, nowMs) {
 // move it weekendDelay minutes later. Null when there's none: bedtime off, no
 // schedule, the night light held off, or bedtime falling after the night ends.
 function bedtimeAt(settings, location, nowMs) {
-  if (!settings.bedtime || followsSwitch(settings, location)) return null
-  if (!desiredState(settings, location, nowMs).on) return null
-  var schedule = scheduleAt(settings, location, nowMs)
-  if (!schedule.on) return null
-  var nightStart = scheduleStart(settings, location, nowMs)
-  var evening = nightStart - 12 * 3600000
-  var at = nextClock(evening, parseTime(settings.bedtimeAt))
-  var weekday = new Date(evening).getDay()
+  if (!settings.bedtime) return null
+  var night = nightAt(settings, location, nowMs)
+  if (!night) return null
+  var at = nextClock(night.evening, parseTime(settings.bedtimeAt))
+  var weekday = new Date(night.evening).getDay()
   if (weekday === 5 || weekday === 6) at += settings.weekendDelay * MINUTE_MS
-  if (at >= schedule.next) return null
-  if (at <= nightStart) return { start: nightStart, lengthMs: 0 }
+  if (at >= night.end) return null
+  if (at <= night.start) return { start: night.start, lengthMs: 0 }
   return { start: at, lengthMs: settings.ramp ? settings.fadeIn * MINUTE_MS : 0 }
+}
+
+// Dimming in the night under way: when it starts easing in (at dimFrom, placed
+// in the night like bedtime, or the night's start if that's later) and over how
+// long (0 with Gradual off). Null when there's none, including in Movie mode.
+function dimAt(settings, location, nowMs) {
+  if (!settings.dim || movieKelvin(settings, nowMs) !== null) return null
+  var night = nightAt(settings, location, nowMs)
+  if (!night) return null
+  var at = nextClock(night.evening, parseTime(settings.dimFrom))
+  if (at >= night.end) return null
+  return { start: Math.max(at, night.start), easeMs: settings.ramp ? DIM_EASE_MS : 0 }
+}
+
+// How far below full brightness dimming is now, in percent, unrounded: easing
+// in from its start, and back out with the morning's clear-down.
+function dimDepth(settings, location, nowMs) {
+  var dim = dimAt(settings, location, nowMs)
+  if (!dim || nowMs < dim.start) return 0
+  var depth = (FULL_GAMMA - settings.dimPercent) * (dim.easeMs > 0 ? Math.min(1, (nowMs - dim.start) / dim.easeMs) : 1)
+  var ramp = rampAt(settings, location, nowMs)
+  if (ramp && !ramp.warming) depth *= ramp.progress
+  return depth
+}
+
+// The gamma hyprsunset should have now, a whole percent. Full brightness
+// unless dimming is on and under way; a paused app gets full brightness too.
+function gammaAt(settings, location, nowMs, paused) {
+  if (paused === true) return FULL_GAMMA
+  return Math.round(FULL_GAMMA - dimDepth(settings, location, nowMs))
+}
+
+// How long dimming takes to move a whole percent while it's easing in or out,
+// never under MIN_STEP_MS. Null while it holds still.
+function gammaStepMs(settings, location, nowMs) {
+  var dim = dimAt(settings, location, nowMs)
+  if (!dim || nowMs < dim.start) return null
+  var full = FULL_GAMMA - settings.dimPercent
+  if (full <= 0) return null
+  var ramp = rampAt(settings, location, nowMs)
+  var lengths = []
+  if (dim.easeMs > 0 && nowMs < dim.start + dim.easeMs) lengths.push(dim.easeMs)
+  if (ramp && !ramp.warming) lengths.push(ramp.lengthMs)
+  if (lengths.length === 0) return null
+  // Easing in and clearing down at once (a short night) adds the two rates.
+  var rate = 0
+  for (var i = 0; i < lengths.length; i++) rate += full / lengths[i]
+  return Math.max(MIN_STEP_MS, 1 / rate)
 }
 
 // Whether bedtime has come (its fade may still be under way).
@@ -647,7 +716,7 @@ function nextClock(nowMs, minute) {
 
 // The next moment the screen should change by itself, so the service can sleep
 // until then instead of checking all the time: a scheduled switch, the start of
-// the clear-down, bedtime, the next visible fade step or the end of the fade, a
+// the clear-down, bedtime, dimming, the next visible fade step or the end of the fade, a
 // hold ending, or just after one of hyprsunset.conf's own switch times. Null
 // when nothing is due.
 function nextDueAt(settings, location, nowMs, profileMinutes) {
@@ -667,6 +736,13 @@ function nextDueAt(settings, location, nowMs, profileMinutes) {
   if (bed) {
     due.push(bed.start)
     due.push(bed.start + bed.lengthMs)
+  }
+  var dim = dimAt(settings, location, nowMs)
+  if (dim) {
+    due.push(dim.start)
+    due.push(dim.start + dim.easeMs)
+    var gammaStep = gammaStepMs(settings, location, nowMs)
+    if (gammaStep !== null) due.push(nowMs + gammaStep)
   }
   var minutes = Array.isArray(profileMinutes) ? profileMinutes : []
   var lastRecheck = PROFILE_RECHECK_MS[PROFILE_RECHECK_MS.length - 1]
@@ -861,6 +937,11 @@ if (typeof module !== "undefined") {
     bedtimeAt: bedtimeAt,
     bedtimeReached: bedtimeReached,
     MAX_WEEKEND_DELAY: MAX_WEEKEND_DELAY,
+    FULL_GAMMA: FULL_GAMMA,
+    MIN_DIM_PERCENT: MIN_DIM_PERCENT,
+    dimAt: dimAt,
+    gammaAt: gammaAt,
+    gammaStepMs: gammaStepMs,
     presetKelvin: presetKelvin,
     temperaturePatch: temperaturePatch,
     presetName: presetName,

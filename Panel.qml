@@ -534,7 +534,7 @@ Panel {
           foreground: root.bar.foreground
         }
 
-        // A second, warmer level later in the night.
+        // Later in the night: a second, warmer level, and dimming.
         Column {
           width: parent.width
           spacing: Style.space(10)
@@ -565,6 +565,26 @@ Panel {
             label: strings.t("bedtime.weekend")
             valueText: root.weekendText(root.serviceReady ? root.service.weekendDelay : 0)
             onStepped: function(direction) { if (root.serviceReady) root.service.stepWeekendDelay(direction * root.stepMinutes) }
+          }
+
+          SwitchRow {
+            label: strings.t("dim.level")
+            checked: root.serviceReady && root.service.dim
+            onToggled: if (root.serviceReady) root.service.setDim(!root.service.dim)
+          }
+
+          TimeRow {
+            visible: root.serviceReady && root.service.dim
+            label: strings.t("dim.from")
+            timeKey: "dimFrom"
+            timeValue: root.serviceReady ? root.service.dimFrom : ""
+          }
+
+          StepRow {
+            visible: root.serviceReady && root.service.dim
+            label: strings.t("dim.percent")
+            valueText: strings.t("percent").arg(root.serviceReady ? root.service.dimPercent : 80)
+            onStepped: function(direction) { if (root.serviceReady) root.service.stepDimPercent(direction * 5) }
           }
         }
 
