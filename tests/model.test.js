@@ -1388,3 +1388,36 @@ test("twilight fades step evenly and keep the checks down", () => {
     assert.ok(due !== null && due > now, "nothing due in the past at minute " + minute)
   }
 })
+
+// ---- Location by city name ------------------------------------------------------------
+
+test("the location field takes coordinates, a city, or nothing", () => {
+  assert.deepStrictEqual(Model.locationRequest(""), { kind: "clear" })
+  assert.deepStrictEqual(Model.locationRequest("   "), { kind: "clear" })
+  assert.deepStrictEqual(Model.locationRequest("52.52, 13.40"), { kind: "coordinates", latitude: 52.52, longitude: 13.4 })
+  assert.deepStrictEqual(Model.locationRequest("  Berlin "), { kind: "city", query: "Berlin" })
+  assert.deepStrictEqual(Model.locationRequest("São Paulo"), { kind: "city", query: "São Paulo" })
+  assert.strictEqual(Model.locationRequest("95, 200"), null, "numbers off the Earth are a typo, not a city")
+  assert.strictEqual(Model.locationRequest("x".repeat(65)), null)
+  assert.strictEqual(Model.locationRequest("Ber\nlin"), null)
+})
+
+test("a geocoding answer gives the first place, named briefly and safely", () => {
+  const berlin = JSON.stringify({ results: [{ name: "Berlin", latitude: 52.52437, longitude: 13.41053, country: "Germany", admin1: "State of Berlin" }] })
+  assert.deepStrictEqual(Model.geocodeResult(berlin), { latitude: 52.52437, longitude: 13.41053, name: "Berlin, Germany" })
+  assert.strictEqual(Model.geocodeResult(JSON.stringify({ generationtime_ms: 0.2 })), null, "nothing found")
+  assert.strictEqual(Model.geocodeResult("<html>"), null)
+  assert.strictEqual(Model.geocodeResult(JSON.stringify({ results: [{ name: "Nowhere", latitude: 123, longitude: 0 }] })), null)
+  const sly = Model.geocodeResult(JSON.stringify({ results: [{ name: "<b>Town</b>", latitude: 1, longitude: 2 }] }))
+  assert.ok(!/[<>]/.test(sly.name), sly.name)
+  assert.strictEqual(Model.geocodeResult(JSON.stringify({ results: [{ name: "Island", latitude: 1, longitude: 2 }] })).name, "Island", "no country")
+})
+
+test("a found city's name shows with its coordinates and stays in the state file", () => {
+  const s = settings({ latitude: 52.52, longitude: 13.41, placeName: "Berlin, Germany" })
+  assert.strictEqual(Model.resolveLocation(s, null, null).label, "Berlin, Germany")
+  assert.strictEqual(Model.splitSettings(s).state.placeName, "Berlin, Germany")
+  assert.ok(!("placeName" in Model.splitSettings(s).settings))
+  assert.strictEqual(settings({ placeName: "Berlin" }).placeName, "", "no name without coordinates")
+  assert.strictEqual(settings({ latitude: 1, longitude: 2, placeName: "<i>x</i>" }).placeName.indexOf("<"), -1)
+})

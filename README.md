@@ -4,7 +4,7 @@ A night light for [Omarchy](https://omarchy.org). It warms the screen at sunset,
 
 Locus started as a fork of [Sundown](https://github.com/WilliamJohnDavisIII/omarchy-sundown) by William John Davis III and has gone its own way since. See [Credits](#credits).
 
-It's built on `hyprsunset`, which Omarchy already ships. Sun times are calculated on your computer, so it makes no network requests unless you turn on location detection.
+It's built on `hyprsunset`, which Omarchy already ships. Sun times are calculated on your computer, so it makes no network requests unless you turn on location detection or look up a city.
 
 ## Install
 
@@ -66,16 +66,18 @@ While an app has it paused, the switch still shows what the schedule says, and t
 
 Sun mode uses the first of these it finds:
 
-1. Coordinates you enter with the pencil button in the panel
+1. A city or coordinates you enter with the pencil button in the panel
 2. Your detected location, if the crosshairs button is on
 3. Omarchy's weather location, if it has coordinates and not only a name
 4. The main city of your system time zone, from `/usr/share/zoneinfo/zone1970.tab`
+
+A city is looked up once, when you press Enter, with [Open-Meteo](https://open-meteo.com)'s geocoding service, which receives the name you typed and nothing else. The first place it finds is kept with its coordinates, so it isn't asked again; if it picks the wrong one, enter coordinates instead. Place names come from [GeoNames](https://www.geonames.org) (CC BY 4.0).
 
 The time zone is only a rough guide, so sunset can be off by a while if you live far from that city. If none of these is available, the switch stays how you set it until you enter a location.
 
 Location detection is off by default. It asks `geo.omarchy.org` for the city of your IP address, as Omarchy's weather widget does, when the shell starts, every few hours, and after a long sleep. The last answer is kept so it works offline, and is deleted when you turn this off. A VPN will make it report the VPN's location.
 
-Your settings are saved in `~/.local/state/omarchy/settings/locus.json`. Coordinates you enter, the detected location, and holds go in `locus-state.json` beside it, so you can back up or sync your settings without your location. Locus keeps both files readable only by your account. If you used Sundown, Locus copies its settings (`heliotrope.json`) once, the first time it runs, and sorts them into the two files.
+Your settings are saved in `~/.local/state/omarchy/settings/locus.json`. The city or coordinates you enter, the detected location, and holds go in `locus-state.json` beside it, so you can back up or sync your settings without your location. Locus keeps both files readable only by your account. If you used Sundown, Locus copies its settings (`heliotrope.json`) once, the first time it runs, and sorts them into the two files.
 
 ## Commands
 
@@ -91,6 +93,7 @@ omarchy-shell $ID preset candle         # Or mild, night, warm
 omarchy-shell $ID schedule sun          # Or manual, or custom
 omarchy-shell $ID hours 21:00 07:00     # Custom on and off times
 omarchy-shell $ID location "52.52, 13.40"
+omarchy-shell $ID location Berlin       # Looked up once; status shows what it found
 omarchy-shell $ID location ""           # Back to the automatic location
 omarchy-shell $ID ramp off              # Or on: change gradually
 omarchy-shell $ID autolocation on       # Or off: detect location from your IP
@@ -163,7 +166,7 @@ Ideas, not code, from:
 - [Sunset Night Light](https://github.com/agkrishnendu/omarchy-nightlight) by agkrishnendu: a second, warmer temperature later in the evening.
 - [Redshift](https://github.com/jonls/redshift) and [gammastep](https://gitlab.com/chinstrap/gammastep): changing with the sun's height through twilight rather than by the clock.
 - [Moonshine](https://github.com/tiagoabiramia/omarchy-moonshine) by Tiago Abi-Ramia: software dimming for Omarchy.
-- [Night Light](https://github.com/key-tone/omarchy-nightlight) by Kenny Keeton: pausing for an hour, or until sunrise; one-click presets, including Night at 3400K and Candle at 1900K.
+- [Night Light](https://github.com/key-tone/omarchy-nightlight) by Kenny Keeton: pausing for an hour, or until sunrise; one-click presets, including Night at 3400K and Candle at 1900K; looking up a city with Open-Meteo.
 
 ## License
 

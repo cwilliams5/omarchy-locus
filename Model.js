@@ -65,6 +65,7 @@ function defaultSettings() {
     offTime: "07:00",
     latitude: null,
     longitude: null,
+    placeName: "", // The city typed for those coordinates, if one was
     override: null,
     ramp: true,
     rampSkipUntil: 0,
@@ -98,7 +99,7 @@ var SETTING_KEYS = ["mode", "temperature", "onTime", "offTime", "ramp", "fadeIn"
                     "sunsetOffset", "pauseFullscreen", "pauseApps", "autoLocation",
                     "bedtime", "bedtimeAt", "bedtimeTemperature", "weekendDelay",
                     "dim", "dimFrom", "dimPercent", "twilight"]
-var STATE_KEYS = ["manualOn", "override", "rampSkipUntil", "latitude", "longitude", "detected"]
+var STATE_KEYS = ["manualOn", "override", "rampSkipUntil", "latitude", "longitude", "placeName", "detected"]
 
 function pickKeys(object, keys) {
   var out = {}
@@ -243,6 +244,7 @@ function normalizeSettings(raw) {
   if (isLatitude(raw.latitude) && isLongitude(raw.longitude)) {
     result.latitude = raw.latitude
     result.longitude = raw.longitude
+    if (typeof raw.placeName === "string") result.placeName = displayName(raw.placeName)
   }
   var override = raw.override
   if (override && typeof override.on === "boolean" && Number.isFinite(override.until)) {
@@ -284,6 +286,38 @@ function parseCoordinates(text) {
   var latitude = Number(match[1])
   var longitude = Number(match[2])
   return isLatitude(latitude) && isLongitude(longitude) ? { latitude: latitude, longitude: longitude } : null
+}
+
+// What the panel's location field (or the location command) asks for: back
+// to automatic ("clear"), coordinates, or a city to look up. Null when it
+// can't be any of them.
+var CITY_MAX = 64
+function locationRequest(text) {
+  var typed = String(text === undefined || text === null ? "" : text).trim()
+  if (typed === "") return { kind: "clear" }
+  var place = parseCoordinates(typed)
+  if (place) return { kind: "coordinates", latitude: place.latitude, longitude: place.longitude }
+  // Something that looks like numbers but isn't a place on Earth is a typo,
+  // not a city.
+  if (/^[\s\d.,+-]+$/.test(typed)) return null
+  if (typed.length > CITY_MAX || /[\u0000-\u001f\u007f-\u009f]/.test(typed)) return null
+  return { kind: "city", query: typed }
+}
+
+// Open-Meteo's geocoding answer: the first place it found, with a short name
+// for the panel ("Berlin, Germany"). Null when it found nothing or the answer
+// doesn't make sense. The text comes from outside, so it goes through
+// displayName.
+function geocodeResult(text) {
+  var parsed = null
+  try { parsed = JSON.parse(text) } catch (error) { parsed = null }
+  var first = parsed && Array.isArray(parsed.results) ? parsed.results[0] : null
+  if (!first || typeof first !== "object") return null
+  var latitude = Number(first.latitude)
+  var longitude = Number(first.longitude)
+  if (!isLatitude(latitude) || !isLongitude(longitude)) return null
+  var parts = [first.name, first.country].filter(function(part) { return typeof part === "string" && part.trim() !== "" })
+  return { latitude: latitude, longitude: longitude, name: displayName(parts.join(", ")) }
 }
 
 // Omarchy's weather.json. It often holds only a name, which is no use here,
@@ -344,7 +378,7 @@ function movedFar(previous, next) {
 // Null means Sun mode has nothing to go on.
 function resolveLocation(settings, weather, zone) {
   if (settings.latitude !== null && settings.longitude !== null)
-    return { latitude: settings.latitude, longitude: settings.longitude, source: "custom", label: "" }
+    return { latitude: settings.latitude, longitude: settings.longitude, source: "custom", label: settings.placeName }
   if (settings.autoLocation && settings.detected)
     return { latitude: settings.detected.latitude, longitude: settings.detected.longitude, source: "detected", label: settings.detected.name }
   if (weather) return { latitude: weather.latitude, longitude: weather.longitude, source: "weather", label: weather.name }
@@ -1038,6 +1072,8 @@ if (typeof module !== "undefined") {
     extraWarmStep: extraWarmStep,
     normalizeSettings: normalizeSettings,
     parseCoordinates: parseCoordinates,
+    locationRequest: locationRequest,
+    geocodeResult: geocodeResult,
     weatherLocation: weatherLocation,
     zoneName: zoneName,
     zoneCoordinates: zoneCoordinates,

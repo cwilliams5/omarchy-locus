@@ -39,6 +39,13 @@ Item {
   // first time Locus runs, so switching over keeps them.
   readonly property string sundownSettingsPath: settingsDirectory + "/heliotrope.json"
 
+  // A city typed into the panel is looked up once (Open-Meteo's geocoding),
+  // never in the background: "searching", "notfound" or "failed" while the
+  // panel should say so, "" otherwise.
+  property string lookupState: ""
+  property string lookupQuery: ""
+  signal lookupFinished(bool found)
+
   // The icon asks for the panel through here; Panel.qml answers.
   signal panelToggleRequested(var window)
   // The icon holds the bar's hover peek open while this is true.
@@ -287,16 +294,49 @@ Item {
     return true
   }
 
-  // True when saved. Empty text goes back to the automatic location.
+  // Coordinates, a city to look up, or empty for the automatic location.
+  // "ok" when saved, "searching" while a city is looked up (lookupFinished
+  // follows), "invalid" when it can't be either.
   function setLocation(text) {
-    if (String(text).trim() === "") {
-      updateSettings({ latitude: null, longitude: null })
-      return true
+    var request = Model.locationRequest(text)
+    if (!request) return "invalid"
+    if (request.kind !== "city") {
+      geocodeProcess.running = false
+      lookupState = ""
+      if (request.kind === "clear") updateSettings({ latitude: null, longitude: null, placeName: "" })
+      else updateSettings({ latitude: request.latitude, longitude: request.longitude, placeName: "" })
+      return "ok"
     }
-    var place = Model.parseCoordinates(text)
-    if (!place) return false
-    updateSettings({ latitude: place.latitude, longitude: place.longitude })
-    return true
+    geocodeProcess.running = false
+    lookupQuery = request.query
+    lookupState = "searching"
+    // The name goes to curl as an argument, never through a shell; "name="
+    // keeps --data-urlencode from reading a file for a name starting with @.
+    geocodeProcess.command = ["curl", "-fsS", "--max-time", "6", "--get",
+      "--data-urlencode", "name=" + request.query,
+      "--data", "count=1", "--data", "language=en", "--data", "format=json",
+      "https://geocoding-api.open-meteo.com/v1/search"]
+    geocodeProcess.running = true
+    return "searching"
+  }
+
+  // Empty means the request failed (offline, or an error from the service).
+  function handleGeocode(text) {
+    if (lookupState !== "searching") return
+    if (String(text).trim() === "") {
+      lookupState = "failed"
+      lookupFinished(false)
+      return
+    }
+    var place = Model.geocodeResult(text)
+    if (!place) {
+      lookupState = "notfound"
+      lookupFinished(false)
+      return
+    }
+    lookupState = ""
+    updateSettings({ latitude: place.latitude, longitude: place.longitude, placeName: place.name })
+    lookupFinished(true)
   }
 
   function setRamp(enabled) {
@@ -905,6 +945,14 @@ Item {
     }
   }
 
+  Process {
+    id: geocodeProcess
+    stdout: StdioCollector {
+      waitForEnd: true
+      onStreamFinished: root.handleGeocode(text)
+    }
+  }
+
   // Every few hours, or soon again if the network wasn't up yet.
   Timer {
     interval: root.detectSucceeded ? 10800000 : 300000
@@ -963,6 +1011,8 @@ Item {
         savedTemperature: root.temperature,
         mode: root.mode,
         location: root.location ? root.location.source : "none",
+        place: root.location ? Model.displayName(root.location.label) : "",
+        lookup: root.lookupState,
         planOn: root.plan.on,
         until: root.plan.until ? new Date(root.plan.until).toLocaleString() : "",
         previewing: root.previewing,
@@ -1032,9 +1082,8 @@ Item {
     function movie(): string { return root.hold("movie", 0) ? "ok" : "invalid" }
     function preview(kelvin: int): void { root.preview(kelvin) }
     function schedule(mode: string): void { root.setMode(mode) }
-    function location(coordinates: string): string {
-      return root.setLocation(coordinates) ? "ok" : "invalid"
-    }
+    // "52.52, 13.40", a city (looked up once; see status), or "" for automatic.
+    function location(place: string): string { return root.setLocation(place) }
     function ramp(value: string): void { root.setRamp(value === "on") }
     function autolocation(value: string): void { root.setAutoLocation(value === "on") }
     function hours(onTime: string, offTime: string): void {

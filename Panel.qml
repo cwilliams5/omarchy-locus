@@ -101,7 +101,7 @@ Panel {
   function locationText() {
     var place = serviceReady ? service.location : null
     if (!place) return strings.t("location.none")
-    if (place.source === "custom")
+    if (place.source === "custom" && place.label === "")
       return Commons.I18n.formatNumber(place.latitude, 2) + ", " + Commons.I18n.formatNumber(place.longitude, 2)
     if (place.source === "timezone") {
       var parts = String(place.label).split("/")
@@ -665,18 +665,48 @@ Panel {
             font.family: root.bar.fontFamily
             font.pixelSize: Style.font.body
             onAccepted: {
-              // Empty goes back to finding it automatically. Anything unreadable stays
-              // selected, ready to be typed over.
-              if (root.serviceReady && root.service.setLocation(text)) {
+              // Empty goes back to finding it automatically. A city stays open
+              // until it's found. Anything unreadable stays selected, ready to
+              // be typed over.
+              var result = root.serviceReady ? root.service.setLocation(text) : "invalid"
+              if (result === "ok") {
                 root.editingLocation = false
                 keys.forceActiveFocus()
-              } else {
+              } else if (result === "invalid") {
                 selectAll()
               }
             }
             Keys.onEscapePressed: {
               root.editingLocation = false
               keys.forceActiveFocus()
+            }
+          }
+
+          // How a city lookup is going.
+          Text {
+            width: parent.width
+            visible: locationField.visible && root.serviceReady && root.service.lookupState !== ""
+            textFormat: Text.PlainText
+            wrapMode: Text.Wrap
+            text: !root.serviceReady ? "" : root.service.lookupState === "searching" ? strings.t("location.searching")
+              : root.service.lookupState === "notfound" ? strings.t("location.notFound").arg(root.service.lookupQuery)
+              : strings.t("location.failed")
+            color: Qt.darker(root.bar.foreground, 1.4)
+            font.family: root.bar.fontFamily
+            font.pixelSize: Style.font.caption
+          }
+
+          Connections {
+            target: root.serviceReady ? root.service : null
+            ignoreUnknownSignals: true
+            function onLookupFinished(found) {
+              if (!root.editingLocation) return
+              if (found) {
+                root.editingLocation = false
+                keys.forceActiveFocus()
+              } else {
+                locationField.selectAll()
+              }
             }
           }
         }
