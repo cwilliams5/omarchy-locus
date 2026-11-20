@@ -33,9 +33,11 @@ hyprsunset will switch by itself.
 - **Where it came from:** a hard fork of
   [Sundown](https://github.com/WilliamJohnDavisIII/omarchy-sundown) by
   William John Davis III (MIT), renamed on 2026-11-19. The full history is
-  kept: his commits stay his. `LICENSE` keeps his copyright line with Cody's
-  under it, and the README credits him near the top. Keep all three that
-  way. The git remote `sundown` points at his repository.
+  kept: their commits stay theirs. `LICENSE` keeps their copyright line with
+  Cody's under it, and the README credits them near the top. Keep all three
+  that way. The git remote `sundown` points at their repository (listed in
+  the marketplace as Heliotrope). Cody is he/him; William John Davis III,
+  they/them.
 - **The old fork** `cwilliams5/omarchy-sundown` exists only to carry two pull
   requests to the original (#1: run the shader script only while the shader
   is on; #2: allow up to 5500K). They are left open on purpose. Don't touch
@@ -110,10 +112,12 @@ preview.png        the marketplace listing card (a smaller copy of media/hero.pn
    just-started hyprsunset reports, and how Locus recognizes a restart (or an
    identity profile in `hyprsunset.conf`); it's also the line both Locus and
    `omarchy-toggle-nightlight` read as off. A test enforces it.
-6. **The shader script runs on every check only while the shader is on**
-   (`shaderStep`). Running it on every check cost about 29,000 short-lived
-   processes a day for nothing. Removing the shader takes one run; the first
-   check after a shell start runs it once to clear a leftover.
+6. **The shader script runs only when its step changes** (`shaderStep`), after
+   Hyprland's `configreloaded` event (a reload drops the shader, so the step
+   goes back to -1), and once after a shell start to clear a leftover. Running
+   it on every check cost about 29,000 short-lived processes a day (and each
+   run is about 80 ms and a dozen processes). Removing Locus while it's on
+   runs it once with 0 (`Component.onDestruction`).
 7. **Two files, each written only when its half changed.** Settings (Cody's
    choices) in `locus.json`, tracked by his dotfiles; state (holds, Locus
    on/off, typed and detected coordinates) in `locus-state.json`,
@@ -203,6 +207,17 @@ preview.png        the marketplace listing card (a smaller copy of media/hero.pn
 Tested on Omarchy 4.5.0, Hyprland 0.56.2 (Lua config), hyprsunset 0.4.0,
 Quickshell 0.3.2.
 
+- **Locus talks to hyprsunset over its socket**,
+  `$XDG_RUNTIME_DIR/hypr/$HYPRLAND_INSTANCE_SIGNATURE/.hyprsunset.sock`, the
+  one `hyprctl hyprsunset` uses (`sunsetRequest` in Service.qml): one request
+  per connection (`temperature`, `temperature 3000`, `identity`, `gamma 80`),
+  a reply without a newline (`6500`, `ok`, or an error message), and the
+  connection left open, so the client must close it (a client waiting for
+  the server to close hangs). About 0.1 ms against 9 ms for a `hyprctl`
+  process; in normal running Locus starts no processes. If the socket errors
+  or is silent for 2 s, that one request goes through `hyprctl` instead.
+  Re-check this after hyprsunset updates (it's hyprctl's protocol, not a
+  documented API).
 - `hyprctl hyprsunset temperature [K]`, `identity`, `gamma`. Even 6500K tints
   slightly, so "off" also sends `identity`, which then reads back as 6500K.
 - An identity profile in `hyprsunset.conf` (Omarchy ships one at 07:00), or a

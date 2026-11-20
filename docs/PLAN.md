@@ -424,24 +424,24 @@ and the plan below, with his tweaks: drop the screenshot note under the hero,
 the other things Locus is built on, and **make the socket change now** (a
 selling point, with a battery section in the README).
 
-- [ ] Socket: talk to hyprsunset's socket (`$XDG_RUNTIME_DIR/hypr/$HYPRLAND_INSTANCE_SIGNATURE/.hyprsunset.sock`)
+- [x] Socket: talk to hyprsunset's socket (`$XDG_RUNTIME_DIR/hypr/$HYPRLAND_INSTANCE_SIGNATURE/.hyprsunset.sock`)
       instead of spawning `hyprctl` for the look, the sends and gamma; keep
       `hyprctl` as the fallback; rules 1 and 2 unchanged; CLAUDE.md platform fact.
-- [ ] Sun-time cache in Model.js (pure memo of sunMinutesUtc; results identical)
-- [ ] Skip IP lookups when typed coordinates win (timer condition + detectLocation)
-- [ ] Reuse the 24-hour view on reopen when settings, location and day are unchanged
-- [ ] Shader: rerun warm-shader.sh on Hyprland's `configreloaded` event, not every check (update rule 6)
-- [ ] Fullscreen-pause Connections: `enabled: root.settings.pauseFullscreen`
-- [ ] warm-shader.sh: require XDG_RUNTIME_DIR, mkdir -m 700, owner/no-symlink check, refuse `]]` or newline in shader paths
-- [ ] Shader off on teardown (like gamma); README uninstall: shader too
-- [ ] Apply: numbers as arguments, no shell string (moot if the socket replaces it)
-- [ ] README: remove the hero's screenshot note; battery section; credits for hyprsunset,
+- [x] Sun-time cache in Model.js (pure memo of sunMinutesUtc; results identical)
+- [x] Skip IP lookups when typed coordinates win (timer condition + detectLocation)
+- [x] Reuse the 24-hour view on reopen when settings, location and day are unchanged
+- [x] Shader: rerun warm-shader.sh on Hyprland's `configreloaded` event, not every check (update rule 6)
+- [x] Fullscreen-pause Connections: `enabled: root.settings.pauseFullscreen`
+- [x] warm-shader.sh: require XDG_RUNTIME_DIR, mkdir -m 700, owner/no-symlink check, refuse `]]` or newline in shader paths
+- [x] Shader off on teardown (like gamma); README uninstall: shader too
+- [x] Apply: numbers as arguments, no shell string (moot if the socket replaces it)
+- [x] README: remove the hero's screenshot note; battery section; credits for hyprsunset,
       Quickshell, Omarchy, NOAA's solar equations, Tanner Helland's colour fit, Open-Meteo/GeoNames;
       "Sundown (listed as Heliotrope)"; indicators path labelled unofficial; commands in
       shared locus.json warning; dev tools (ImageMagick, Python, rsvg-convert)
-- [ ] Pronouns in the repo: Cody he/him (keep), William John Davis III they/them; code comments generic
-- [ ] Tests (3 time zones), live test (deep red + `hyprctl reload`, dimming, a hyprsunset restart)
-- [ ] Privacy scan; marketplace scanner (`scratchpad/driver/run-baseline.mjs` if still there)
+- [x] Pronouns in the repo: Cody he/him (keep), William John Davis III they/them; code comments generic
+- [x] Tests (3 time zones), live test (deep red + `hyprctl reload`, deep red across a shell restart, hyprsunset stopped (no processes) and restarted, teardown on a plugin reload). Known for 2.1: a slider preview in the first seconds after a shell start can be undone by the start-up check.
+- [x] Privacy scan; marketplace scanner (`scratchpad/driver/run-baseline.mjs` if still there)
 - [ ] Lock 2.0.0, make public, install test from the public URL, release (notes approved),
       marketplace issue (approved; maintainer notes updated for the socket and fork), old fork notice
 - [ ] Remind Cody: upload media/social-preview.png in Settings

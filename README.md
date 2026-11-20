@@ -11,8 +11,6 @@ that need true colour.
 
 ![The same Omarchy desktop split down the middle: untinted on the left, warmed to 3000K on the right, with Locus's panel open in the warm half](media/hero.png)
 
-<sub>Screenshots can't capture a screen's colour filter, so the warm half applies hyprsunset's own 3000K colour matrix to the same screenshot (`media/tint.sh`).</sub>
-
 Locus warms your screen at sunset, or at hours you pick, and clears it by
 sunrise, gradually enough that you're unlikely to notice it happening. It
 lives in Omarchy's own shell, drives the `hyprsunset` Omarchy already ships,
@@ -57,17 +55,47 @@ through lie on a curve called the Planckian locus.)
 
   ![Locus's panel in five Omarchy themes: Catppuccin Latte, Tokyo Night, Ristretto, Hackerman and Everforest](media/themes.png)
 
-- **Light on your battery.** Locus looks at hyprsunset only when something is
-  due, and otherwise once a minute: about 1,500 short checks a day, each one
-  `hyprctl` call of about 9 ms of processor time. Pausing for apps listens to
-  Hyprland's events instead of checking. Nothing runs for the panel while it's
-  closed.
+- **Light on your battery.** Locus talks to hyprsunset directly over its
+  socket, so in normal running it starts no processes at all, and it looks
+  only when something is due (at least once a minute, so changes made
+  elsewhere are noticed): about 1,500 looks a day at a fraction of a
+  millisecond each. See [Battery](#battery).
 - **Plays well with Omarchy.** Omarchy's own Night Light toggle still works:
   Locus treats it as a hold until its next scheduled change. Locus never
   edits `hyprsunset.conf` or any of Omarchy's files.
 - **A command at sunset and sunrise,** if you want one: a dark theme for the
   night, say.
 - **Everything from the command line too,** through `omarchy-shell`.
+
+## Battery
+
+A night light runs all day, so Locus is built to cost almost nothing:
+
+| | Sundown 1.x, which Locus grew from | Locus 2.0 |
+|---|---|---|
+| Looks at hyprsunset | every 15 seconds: 5,760 a day | when something is due, at least once a minute: about 1,500 a day |
+| How | a new `hyprctl` process each time (about 9 ms of processor time) | a message on hyprsunset's own socket (about 0.1 ms) |
+| Processes started | about 35,000 a day, counting its shader script | none in normal running |
+| Processor time | more than a minute a day | a few seconds a day |
+
+How it stays that small:
+
+- **It sleeps until something is due:** the next step of a fade, a scheduled
+  change, the end of a hold, a switch time in `hyprsunset.conf`. Outside
+  fades that's one look a minute; during the hour after sunset, about one
+  look per visible step.
+- **It talks to hyprsunset directly,** the way `hyprctl` does, instead of
+  starting `hyprctl` for every look and change. If the socket ever fails, it
+  falls back to `hyprctl` for that one request.
+- **It listens instead of polling** for the things it reacts to: Hyprland's
+  events for focus, fullscreen and config reloads; file watchers for its
+  settings and `hyprsunset.conf`.
+- **Nothing runs for the panel while it's closed,** and the 24-hour strip is
+  worked out once per day and setting, not every time the panel opens.
+- **The deep-red shader script runs only when the shader changes,** not on
+  every look.
+- **No network** unless you turn on location detection or type a city, and
+  never once your own coordinates are set.
 
 ## Install
 
@@ -103,13 +131,14 @@ or look up a city.
 
 ```bash
 omarchy plugin remove io.github.cwilliams5.locus
-hyprctl hyprsunset identity && hyprctl hyprsunset gamma 100
 rm ~/.local/state/omarchy/settings/locus.json ~/.local/state/omarchy/settings/locus-state.json
 ```
 
-The second line clears any tint or dimming left on the screen, and the third
-deletes your settings. If you took `NightLight` out of the indicators, put it back in
-`~/.config/omarchy/shell.json`.
+Locus takes its tint, dimming and deep-red shader off the screen as it's
+removed (a tint set by Omarchy's own toggle is left alone). The second line
+deletes your settings. If you took `NightLight` out of the indicators, or
+added Locus to them, put `~/.config/omarchy/shell.json` back as it was. If a
+tint is ever left behind, `hyprctl hyprsunset identity` clears it.
 
 **Tested with** Omarchy 4.5.0, Hyprland 0.56.2, hyprsunset 0.4.0 and
 Quickshell 0.3.2, on an Intel laptop with a 2x screen. Sundown, which Locus
@@ -130,7 +159,8 @@ tint survived a suspend and resume.
   [hyprwm/hyprsunset#103](https://github.com/hyprwm/hyprsunset/issues/103).
 - **Screenshots and screen recordings don't show the tint,** because it's
   applied on the way to the screen, after capture. Only the deep-red shader
-  below 1000K shows up in them.
+  below 1000K shows up in them. The warm images on this page apply
+  hyprsunset's own colour matrix to real screenshots (`media/tint.sh`).
 - **After a suspend,** the tint may not come back on some hardware:
   [omacom/omarchy#16052](https://github.com/omacom/omarchy/issues/16052)
   reports it disappearing on an AMD Framework laptop, while hyprsunset still
@@ -362,7 +392,9 @@ omarchy-shell $ID runcommand on         # Run one now, to try it
 ## Settings
 
 Your choices are saved in `~/.local/state/omarchy/settings/locus.json`, which
-is safe to back up or keep in your dotfiles. The panel and the commands above
+is safe to back up or keep in your dotfiles. It can hold commands to run at
+sunset and sunrise (`onCommand`, `offCommand`), so check those before using a
+`locus.json` someone else gave you. The panel and the commands above
 change it; if you edit it by hand, replace it whole (save to another name and
 rename it over), because Locus may read a half-written file as empty.
 
@@ -397,7 +429,8 @@ files.
 
 ## Show it with Omarchy's indicators
 
-To have the icon appear among Omarchy's indicators instead of on its own:
+An unofficial workaround, optional: to have the icon appear among Omarchy's
+indicators instead of on its own:
 
 1. Set `showIcon` to `false` on the Locus entry in `~/.config/omarchy/shell.json`.
 2. Add this to the `omarchy.indicators` `items`, using your own home folder:
@@ -423,11 +456,20 @@ manifest. [CLAUDE.md](CLAUDE.md) explains how Locus works and the rules it
 keeps, and `docs/PLAN.md` its development history.
 
 The warm screenshots are made with `media/tint.sh`, which applies hyprsunset's
-own colour matrix to a screenshot.
+own colour matrix to a screenshot (it needs ImageMagick and Python), and the
+logo files with `python3 branding/build.py` (it needs `rsvg-convert`).
 
 ## Credits
 
-Locus is a hard fork of [Sundown](https://github.com/WilliamJohnDavisIII/omarchy-sundown) by [William John Davis III](https://github.com/WilliamJohnDavisIII) (MIT). Its foundation is his work: the sun times and location, the way it drives `hyprsunset` and notices changes made elsewhere, the panel, and the extra-warm shader. His commits are kept in this repository's history.
+Locus is a hard fork of [Sundown](https://github.com/WilliamJohnDavisIII/omarchy-sundown) by [William John Davis III](https://github.com/WilliamJohnDavisIII) (MIT), listed in the Omarchy plugin marketplace as Heliotrope. Its foundation is their work: the sun times and location, the way it drives `hyprsunset` and notices changes made elsewhere, the panel, and the extra-warm shader. Their commits are kept in this repository's history.
+
+Built on:
+
+- [hyprsunset](https://github.com/hyprwm/hyprsunset) by the Hyprland project: it puts the colour on the screen. Locus tells it what and when.
+- [Omarchy](https://omarchy.org) and its [Quickshell](https://quickshell.org)-based shell, which Locus runs inside and takes its look from.
+- NOAA's [solar calculator equations](https://gml.noaa.gov/grad/solcalc/calcdetails.html), for sunrise, sunset and twilight.
+- Tanner Helland's [temperature-to-colour fit](https://tannerhelland.com/2012/09/18/convert-temperature-rgb-algorithm-code.html), which hyprsunset uses and the 24-hour strip draws with.
+- Optional, only when you use them: Omarchy's location service (`geo.omarchy.org`), and [Open-Meteo](https://open-meteo.com)'s geocoding with place names from [GeoNames](https://www.geonames.org).
 
 Ideas, not code, from:
 

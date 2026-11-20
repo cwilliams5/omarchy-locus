@@ -29,6 +29,12 @@ Item {
     // or disabling Locus at night mustn't leave the screen dim.
     if (gammaSent !== null && gammaSent !== Model.FULL_GAMMA)
       Quickshell.execDetached(["hyprctl", "hyprsunset", "gamma", String(Model.FULL_GAMMA)])
+    // Nor deep red: the shader would stay until the next config reload.
+    if (shaderStep > 0) Quickshell.execDetached([shaderScript, "0"])
+    // Nor warm, if the tint is ours (one set by Omarchy's toggle is left alone).
+    // A plugin update reloads Locus too; the new one puts the tint back at once.
+    if (!externalHold && applyTarget > 0 && applyTarget < Model.FRESH_TEMP)
+      Quickshell.execDetached(["sh", "-c", "hyprctl hyprsunset temperature 6500 && hyprctl hyprsunset identity"])
   }
 
   readonly property int minTemp: Model.MIN_TEMP
@@ -36,7 +42,7 @@ Item {
   readonly property int previewMilliseconds: 10000
   readonly property string home: Quickshell.env("HOME")
   readonly property string settingsDirectory: home + "/.local/state/omarchy/settings"
-  // Cody's choices, tracked by his dotfiles. Holds, the manual switch and typed
+  // The user's choices, safe to keep in dotfiles. Holds, the on/off switch and typed
   // coordinates go in the state file instead: they change by themselves or are
   // private, so they never reach the dotfiles, and a hold never rewrites this.
   readonly property string settingsPath: settingsDirectory + "/locus.json"
@@ -120,6 +126,23 @@ Item {
   property bool applySettled: true
   property int applyAttempts: 0
   property int queuedTarget: 0
+  // A look, a send or a gamma change in flight (see sunsetRequest).
+  property bool probeBusy: false
+  property bool applyBusy: false
+  property bool gammaBusy: false
+
+  // hyprsunset's own socket, the one hyprctl uses: one request per connection,
+  // a reply without a newline ("ok", a value, or an error message), and the
+  // connection left open for the client to close. About 0.1 ms a request,
+  // against about 9 ms for a hyprctl process, and no process at all. hyprctl
+  // is the fallback, request by request, if the socket fails or is silent.
+  readonly property string sunsetSocketPath: {
+    var runtime = Quickshell.env("XDG_RUNTIME_DIR") || ""
+    var instance = Quickshell.env("HYPRLAND_INSTANCE_SIGNATURE") || ""
+    return runtime !== "" && instance !== "" ? runtime + "/hypr/" + instance + "/.hyprsunset.sock" : ""
+  }
+  property var sunsetQueue: []
+  property var sunsetCurrent: null
   property real lastStartAttempt: 0
   property bool shaderQueued: false
   // The step warm-shader.sh last applied, and the one it is applying now. -1
@@ -370,7 +393,8 @@ Item {
   }
 
   function detectLocation() {
-    if (!settingsLoaded || !settings.autoLocation || detectProcess.running) return
+    // Typed coordinates always win, so a lookup would be thrown away.
+    if (!settingsLoaded || !settings.autoLocation || settings.latitude !== null || detectProcess.running) return
     detectProcess.running = true
   }
 
@@ -485,8 +509,15 @@ Item {
   // across it (Model.daySamples). Worked out only while the panel is open.
   function dayView(nowMs, stepMs, count) {
     var from = Model.viewStart(nowMs)
-    return { from: from, stepMs: stepMs, samples: Model.daySamples(settings, location, from, stepMs, count) }
+    var key = JSON.stringify([from, stepMs, count, settings, location])
+    if (dayViewCache && dayViewCache.key === key) return dayViewCache.view
+    var view = { from: from, stepMs: stepMs, samples: Model.daySamples(settings, location, from, stepMs, count) }
+    dayViewCache = { key: key, view: view }
+    return view
   }
+  // The last view and what it was worked out from, so reopening the panel on
+  // an unchanged day doesn't redo it.
+  property var dayViewCache: null
 
   function viewPaint(sample) { return Model.viewPaint(sample, settings.temperature) }
 
@@ -539,13 +570,73 @@ Item {
     if (actualTemp === null) return
     var want = wantedGamma()
     if (want === gammaSent) return
-    if (gammaProcess.running) {
+    if (gammaBusy) {
       gammaQueued = true
       return
     }
+    gammaBusy = true
     gammaRunValue = want
-    gammaProcess.command = ["hyprctl", "hyprsunset", "gamma", String(want)]
-    gammaProcess.running = true
+    sunsetRequest(["gamma", String(want)], function(reply) {
+      root.gammaBusy = false
+      // A failed change is tried again at the next check.
+      root.gammaSent = reply === "ok" ? root.gammaRunValue : null
+      if (!root.gammaQueued) return
+      root.gammaQueued = false
+      root.syncGamma()
+    })
+  }
+
+  // Sends one request to hyprsunset (args as for `hyprctl hyprsunset`, like
+  // ["temperature", "3000"]), one at a time in order; done(reply) gets the
+  // reply trimmed, or hyprctl's error text if nothing answered.
+  function sunsetRequest(args, done) {
+    sunsetQueue.push({ args: args, done: done, viaHyprctl: false })
+    // Later, so a request made from a reply's callback starts on a fresh connection.
+    if (!sunsetCurrent) Qt.callLater(sunsetNext)
+  }
+
+  function sunsetNext() {
+    if (sunsetCurrent || sunsetQueue.length === 0) return
+    sunsetCurrent = sunsetQueue.shift()
+    if (sunsetSocketPath === "") {
+      sunsetFallback()
+      return
+    }
+    sunsetTimeout.restart()
+    sunsetSocket.connected = true
+  }
+
+  function sunsetSocketReady() {
+    if (!sunsetCurrent || sunsetCurrent.viaHyprctl) return
+    sunsetSocket.write(sunsetCurrent.args.join(" "))
+    sunsetSocket.flush()
+  }
+
+  function sunsetFinish(reply) {
+    sunsetTimeout.stop()
+    var current = sunsetCurrent
+    sunsetCurrent = null
+    if (sunsetSocket.connected) sunsetSocket.connected = false
+    if (current) current.done(String(reply).trim())
+    if (!sunsetCurrent) Qt.callLater(sunsetNext)
+  }
+
+  // No socket, an error, or no answer in time: the same request through hyprctl.
+  function sunsetFallback() {
+    sunsetTimeout.stop()
+    if (sunsetSocket.connected) sunsetSocket.connected = false
+    if (!sunsetCurrent || sunsetCurrent.viaHyprctl) return
+    sunsetCurrent.viaHyprctl = true
+    sunsetProcess.command = ["hyprctl", "hyprsunset"].concat(sunsetCurrent.args)
+    sunsetProcess.running = true
+  }
+
+  function startProbe() {
+    probeBusy = true
+    sunsetRequest(["temperature"], function(reply) {
+      root.probeBusy = false
+      root.handleProbe(reply)
+    })
   }
 
   function tick() {
@@ -582,14 +673,14 @@ Item {
     fadeOutNow = Math.round(lengths.outMs / 60000)
     // Look first; step() decides what to send once hyprsunset has answered. A
     // look already under way, or the one that follows a send, does the same.
-    if (!probeProcess.running && !applyProcess.running) probeProcess.running = true
+    if (!probeBusy && !applyBusy) startProbe()
     syncShader()
     scheduleNext(now)
   }
 
   // What to send, now that hyprsunset's reading is known.
   function step() {
-    if (switching || applyProcess.running || queuedTarget) return
+    if (switching || applyBusy || queuedTarget) return
     var level = currentLevel()
     var want = wantOn()
     if (lastPlanOn !== want) {
@@ -643,23 +734,37 @@ Item {
   }
 
   function runApply() {
-    if (applyProcess.running) {
+    if (applyBusy) {
       queuedTarget = applyTarget
       return
     }
     // Even 6500K tints the screen, so off also restores the identity matrix.
     var target = Number(applyTarget)
-    applyProcess.command = ["bash", "-c",
-      "hyprctl hyprsunset temperature " + Model.hyprsunsetKelvin(target)
-      + (target === Model.OFF_TEMP ? " && hyprctl hyprsunset identity" : "")]
-    applyProcess.running = true
+    applyBusy = true
+    sunsetRequest(["temperature", String(Model.hyprsunsetKelvin(target))], function(reply) {
+      if (target === Model.OFF_TEMP && reply === "ok") root.sunsetRequest(["identity"], root.applyDone)
+      else root.applyDone()
+    })
     syncShader()
   }
 
-  // The part below hyprsunset's 1000K. While the shader is on, also run on every
-  // check, to put it back after a config reload. Taking it off, including when
-  // something else set the temperature, takes one run; after that there is
-  // nothing of ours on the screen, so checks above 1000K skip the script.
+  // After a send: the next one if another came in meanwhile, else a look to
+  // confirm it took.
+  function applyDone() {
+    applyBusy = false
+    if (queuedTarget) {
+      queuedTarget = 0
+      runApply()
+      return
+    }
+    if (!probeBusy) startProbe()
+  }
+
+  // The part below hyprsunset's 1000K. The script runs only when the step
+  // changes (taking it off, including when something else set the temperature,
+  // is one run), after a config reload drops the shader (shaderStep goes back
+  // to -1), and once at start to clear a leftover. Not on every check: a run
+  // costs about 80 ms and a dozen processes.
   function syncShader() {
     if (!applyTarget) return
     // Queued even at 0: the run in progress may be putting the shader on.
@@ -668,7 +773,9 @@ Item {
       return
     }
     var step = externalHold ? 0 : Model.extraWarmStep(applyTarget)
-    if (step === 0 && shaderStep === 0) return
+    // Only when it changes: a config reload (which drops the shader) sets
+    // shaderStep back to -1 (see the configreloaded event below).
+    if (step === shaderStep) return
     shaderRunStep = step
     shaderProcess.command = [shaderScript, String(step)]
     shaderProcess.running = true
@@ -677,7 +784,7 @@ Item {
   function handleProbe(text) {
     var trimmed = String(text).trim()
     var reported = /^[0-9]+$/.test(trimmed) ? Number(trimmed) : null
-    if (applyProcess.running || queuedTarget) return
+    if (applyBusy || queuedTarget) return
 
     var now = Date.now()
     var profileSwitched = Model.profileSwitchBetween(profiles.minutes, lastLookAt, now)
@@ -905,16 +1012,38 @@ Item {
     }
   }
 
-  Process {
-    id: applyProcess
-    onExited: function() {
-      if (root.queuedTarget) {
-        root.queuedTarget = 0
-        root.runApply()
-        return
+  Socket {
+    id: sunsetSocket
+    path: root.sunsetSocketPath
+    // The reply has no newline: take each chunk as it comes.
+    parser: SplitParser {
+      splitMarker: ""
+      onRead: function(data) {
+        if (root.sunsetCurrent && !root.sunsetCurrent.viaHyprctl) root.sunsetFinish(data)
       }
-      if (!probeProcess.running) probeProcess.running = true
     }
+    onConnectionStateChanged: if (connected) root.sunsetSocketReady()
+    onError: function(error) {
+      if (!root.sunsetCurrent || root.sunsetCurrent.viaHyprctl) return
+      // Refused (0) or no socket (2): hyprsunset isn't running, and hyprctl
+      // would only say the same. Anything else: try hyprctl.
+      if (error === 0 || error === 2) root.sunsetFinish("")
+      else root.sunsetFallback()
+    }
+  }
+
+  Process {
+    id: sunsetProcess
+    stdout: StdioCollector {
+      waitForEnd: true
+      onStreamFinished: root.sunsetFinish(text)
+    }
+  }
+
+  Timer {
+    id: sunsetTimeout
+    interval: 2000
+    onTriggered: root.sunsetFallback()
   }
 
   Process {
@@ -925,26 +1054,6 @@ Item {
       if (!root.shaderQueued) return
       root.shaderQueued = false
       root.syncShader()
-    }
-  }
-
-  Process {
-    id: gammaProcess
-    onExited: function(exitCode) {
-      // A failed run is tried again at the next check.
-      root.gammaSent = exitCode === 0 ? root.gammaRunValue : null
-      if (!root.gammaQueued) return
-      root.gammaQueued = false
-      root.syncGamma()
-    }
-  }
-
-  Process {
-    id: probeProcess
-    command: ["hyprctl", "hyprsunset", "temperature"]
-    stdout: StdioCollector {
-      waitForEnd: true
-      onStreamFinished: root.handleProbe(text)
     }
   }
 
@@ -983,7 +1092,7 @@ Item {
   // Every few hours, or soon again if the network wasn't up yet.
   Timer {
     interval: root.detectSucceeded ? 10800000 : 300000
-    running: root.settingsLoaded && root.settings.autoLocation
+    running: root.settingsLoaded && root.settings.autoLocation && root.settings.latitude === null
     repeat: true
     triggeredOnStart: true
     onTriggered: root.detectLocation()
@@ -1014,10 +1123,21 @@ Item {
   // when focus or fullscreen changes, and only while it matters.
   Connections {
     target: Hyprland
+    enabled: root.settings.pauseFullscreen
     function onRawEvent(event) {
-      if (!root.settings.pauseFullscreen) return
       var name = String(event.name)
       if (name === "fullscreen" || name === "activewindowv2" || name === "closewindow") fullscreenRefresh.restart()
+    }
+  }
+
+  // A config reload drops the screen shader: put it back, only while it's ours.
+  Connections {
+    target: Hyprland
+    enabled: root.shaderStep > 0
+    function onRawEvent(event) {
+      if (String(event.name) !== "configreloaded") return
+      root.shaderStep = -1
+      root.syncShader()
     }
   }
 

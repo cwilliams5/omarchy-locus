@@ -95,8 +95,8 @@ function defaultSettings() {
   }
 }
 
-// Where each setting lives. Settings are Cody's choices, in locus.json, which
-// his dotfiles track. State changes by itself (holds, the manual switch) or is
+// Where each setting lives. Settings are the user's choices, in locus.json, which
+// people keep in their dotfiles. State changes by itself (holds, on/off) or is
 // private (typed coordinates, the detected place), in locus-state.json, which
 // is never tracked. Every key of defaultSettings has exactly one home; a test
 // enforces it, so a new setting can't be added without picking one.
@@ -432,7 +432,24 @@ var CIVIL_ZENITH = 96 // The sun 6 degrees below the horizon: the end of civil d
 // crossing `zenith` degrees (sunrise and sunset by default). When it never
 // gets that far that day, sunrise and sunset fall back to noon or midnight
 // (as they always have), and anything else is NaN.
+// One check asks for the same few sun times dozens of times, so answers are
+// kept (a pure function: same inputs, same answer).
+var sunCache = {}
+var sunCacheSize = 0
 function sunMinutesUtc(year, month, day, latitude, longitude, rising, zenith) {
+  var key = year + "/" + month + "/" + day + "/" + latitude + "/" + longitude + "/" + rising + "/" + zenith
+  if (Object.prototype.hasOwnProperty.call(sunCache, key)) return sunCache[key]
+  if (sunCacheSize >= 256) {
+    sunCache = {}
+    sunCacheSize = 0
+  }
+  var minutes = sunMinutesUncached(year, month, day, latitude, longitude, rising, zenith)
+  sunCache[key] = minutes
+  sunCacheSize++
+  return minutes
+}
+
+function sunMinutesUncached(year, month, day, latitude, longitude, rising, zenith) {
   var target = zenith === undefined ? SUNRISE_ZENITH : zenith
   var julianDay = Date.UTC(year, month, day) / DAY_MS + 2440587.5
   var minutes = 720

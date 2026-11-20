@@ -11,8 +11,12 @@ set -u
 step=${1:-0}
 [[ $step =~ ^([0-9]|10)$ ]] || { echo "STEP must be 0 to 10" >&2; exit 2; }
 
-dir="${XDG_RUNTIME_DIR:-/tmp}/locus"
-mkdir -p "$dir"
+# Only the session's own runtime folder: never a shared one like /tmp, where
+# someone else could leave a "base" file for us to read.
+[[ -n ${XDG_RUNTIME_DIR:-} ]] || { echo "XDG_RUNTIME_DIR isn't set" >&2; exit 1; }
+dir="$XDG_RUNTIME_DIR/locus"
+mkdir -p -m 700 "$dir" || exit 1
+[[ -d $dir && ! -L $dir && -O $dir ]] || { echo "$dir isn't ours" >&2; exit 1; }
 chmod 700 "$dir"
 
 current=$(hyprctl getoption decoration:screen_shader -j 2>/dev/null | jq -r '.str // ""') || exit 1
@@ -28,6 +32,8 @@ fi
 
 set_shader() {
   [[ $1 == "$current" ]] && return 0
+  # The path goes inside a Lua long string: refuse anything that could end it.
+  case $1 in *']]'* | *$'\n'*) echo "refusing an unusual shader path" >&2; return 1 ;; esac
   hyprctl eval "hl.config({ decoration = { screen_shader = [[$1]] } })" >/dev/null
 }
 
