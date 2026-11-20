@@ -86,7 +86,7 @@ Phase C, heavier, each behind a toggle: **none wanted for now** (Cody, 2026-11-2
 
 Phase D, back to go-public:
 
-- [ ] D1. README and media (go-public stage 4), then publish (5), marketplace (6)
+- [ ] D1. README and media (go-public stage 4), then publish (5), marketplace (6): **stage 4 done 2026-11-20** (README, media, every command and link checked, install test from a file URL); stages 5 and 6 prepared, waiting for Cody's go (public, release, marketplace issue)
 - [ ] D2. Point the old fork's README at Locus once Locus is public
 
 ## Working procedure (the exact steps used for A1 to B1)

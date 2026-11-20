@@ -79,6 +79,7 @@ docs/PLAN.md       the development plan and its status list
 branding/          the name, logo and palette (BRANDING.md, build.py)
 media/             README images; tint.sh applies hyprsunset's matrix to a screenshot
 icon.svg           the app tile
+preview.png        the marketplace listing card (a smaller copy of media/hero.png)
 ```
 
 ## Rules that must not be broken (and why)
@@ -281,6 +282,11 @@ Decided on 2026-11-20: no daytime tint (B8), none of the heavier features
 (screen effects, ambient light sensor, calls, per-monitor, smart bulbs) for
 now, and the header switch became Locus on/off (B11). Next: Cody validates
 that, then go-public resumes at stage 4.
+
+2026-11-20 overnight: go-public stage 4 done (README, media), and stages 5
+and 6 prepared but not done: making the repo public, the v2.0.0 release and
+the marketplace issue all wait for Cody's go on the exact text (drafts kept
+outside the repo). `preview.png` at the root is the marketplace card.
 
 When Locus goes public, point the old fork's README at it.
 
