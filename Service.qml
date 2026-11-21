@@ -921,12 +921,13 @@ Item {
   // Both files are owner-only before anything is saved to them (the state file
   // holds coordinates). Saves replace a file but keep its permissions, and this
   // also tightens a file made by an earlier version. With no settings yet,
-  // Sundown's are copied over once, permissions and all, and split on load.
+  // Sundown's are copied over once, permissions and all, into the private state
+  // file (so its coordinates never pass through the synced one), and split on load.
   Process {
     id: settingsSetup
     running: true
     command: ["sh", "-c",
-      "mkdir -p \"$1\" && { [ -e \"$2\" ] || [ ! -f \"$3\" ] || cp -p \"$3\" \"$2\"; } && touch \"$2\" \"$4\" && chmod 600 \"$2\" \"$4\"",
+      "mkdir -p \"$1\" && { [ -e \"$2\" ] || [ -e \"$4\" ] || [ ! -f \"$3\" ] || cp -p \"$3\" \"$4\"; } && touch \"$2\" \"$4\" && chmod 600 \"$2\" \"$4\"",
       "locus", root.settingsDirectory, root.settingsPath, root.sundownSettingsPath, root.statePath]
     onExited: function(exitCode) {
       root.settingsSecured = exitCode === 0

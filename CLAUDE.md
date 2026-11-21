@@ -244,6 +244,18 @@ Quickshell 0.3.2.
   `set: true` once anything has set it, not `[[EMPTY]]`.
 - The Omarchy UI kit (`qs.Ui`: `KeyboardPanel`, `Button`, `PanelHero`...)
   renders text as plain text.
+- **Clipboard reads** (Qt 6.12, QTBUG-149610, omarchy#15083): editable text
+  fields are reported to make the shell read the whole clipboard on every
+  copy. Measured 2026-11-21 with
+  `~/.claude/skills/go-public/scripts/omarchy-qt-pitfalls.sh --measure`
+  (an 8 MB copy): **any open shell panel with keyboard focus reads it**,
+  Locus's (7,993 KiB, with or without its text field) and Omarchy's own
+  audio panel with no text field at all (8,010 KiB); with every panel closed,
+  nothing, even after Locus's panel had been opened (its content stays
+  loaded). Wayland offers the clipboard only to the focused window, so the
+  cost is limited to while a panel is open. Locus keeps its location field
+  in a `Loader` active only while editing anyway (a test enforces it). Don't
+  toggle `readOnly` instead: setting it triggers a read too.
 - **Never declare a QML property named `enabled`** (or another `Item`
   property) on a component: it hides the built-in one, and Omarchy's bar
   (`Util.itemContainsPoint`) reads `item.enabled` up the parent chain to

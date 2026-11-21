@@ -19,6 +19,7 @@
   "location.none": "No location",
   "location.placeholder": "A city, or latitude, longitude",
   "location.searching": "Looking it up…",
+  "location.invalid": "Not a place: type a city's name, or coordinates like 52.52, 13.40 or 52°31'N 13°24'E",
   "location.notFound": "No place called %1 was found",
   "location.failed": "Couldn't reach the city search. Check the connection, or enter coordinates",
   "ramp": "Gradual",

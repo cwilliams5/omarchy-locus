@@ -38,6 +38,10 @@ Panel {
   readonly property int shownTemp: serviceReady && service.actualTemp !== null ? service.actualTemp : temperature
 
   property bool editingLocation: false
+  // What the location field starts with when it opens: typed coordinates, or empty.
+  property string locationPrefill: ""
+  // The field says why Enter did nothing (not a place, or not found).
+  property bool locationInvalid: false
   property real wheelAccumulator: 0
 
   readonly property bool showIcon: setting("showIcon", true) !== false
@@ -645,47 +649,64 @@ Panel {
                 // content, which root can't see into.
                 onClicked: {
                   var place = root.serviceReady ? root.service.location : null
-                  locationField.text = place && place.source === "custom" ? place.latitude + ", " + place.longitude : ""
+                  root.locationPrefill = place && place.source === "custom" ? place.latitude + ", " + place.longitude : ""
+                  root.locationInvalid = false
                   root.editingLocation = true
-                  locationField.forceActiveFocus()
                 }
               }
             }
           }
 
-          TextField {
-            id: locationField
+          // The field exists only while editing: Qt 6.12 can make an editable
+          // field that exists, even hidden, read the whole clipboard on every
+          // copy (QTBUG-149610, omarchy#15083). Measured 2026-11-21, an open
+          // panel reads it anyway (Omarchy's audio panel, with no text field,
+          // too), and a closed one doesn't; this keeps Locus out of it.
+          Loader {
+            id: locationEditor
             width: parent.width
-            visible: root.mode === "sun" && root.editingLocation
-            placeholderText: strings.t("location.placeholder")
-            foreground: root.bar.foreground
-            font.family: root.bar.fontFamily
-            font.pixelSize: Style.font.body
-            onAccepted: {
-              // Empty goes back to finding it automatically. A city stays open
-              // until it's found. Anything unreadable stays selected, ready to
-              // be typed over.
-              var result = root.serviceReady ? root.service.setLocation(text) : "invalid"
-              if (result === "ok") {
-                root.editingLocation = false
-                keys.forceActiveFocus()
-              } else if (result === "invalid") {
-                selectAll()
+            active: root.mode === "sun" && root.editingLocation
+            visible: active
+            sourceComponent: Component {
+              TextField {
+                placeholderText: strings.t("location.placeholder")
+                foreground: root.bar.foreground
+                font.family: root.bar.fontFamily
+                font.pixelSize: Style.font.body
+                Component.onCompleted: {
+                  text = root.locationPrefill
+                  forceActiveFocus()
+                }
+                onTextEdited: root.locationInvalid = false
+                onAccepted: {
+                  // Empty goes back to finding it automatically. A city stays
+                  // open until it's found. Anything unreadable stays selected,
+                  // ready to be typed over.
+                  var result = root.serviceReady ? root.service.setLocation(text) : "invalid"
+                  root.locationInvalid = result === "invalid"
+                  if (result === "ok") {
+                    root.editingLocation = false
+                    keys.forceActiveFocus()
+                  } else if (result === "invalid") {
+                    selectAll()
+                  }
+                }
+                Keys.onEscapePressed: {
+                  root.editingLocation = false
+                  keys.forceActiveFocus()
+                }
               }
-            }
-            Keys.onEscapePressed: {
-              root.editingLocation = false
-              keys.forceActiveFocus()
             }
           }
 
           // How a city lookup is going.
           Text {
             width: parent.width
-            visible: locationField.visible && root.serviceReady && root.service.lookupState !== ""
+            visible: locationEditor.active && root.serviceReady && (root.locationInvalid || root.service.lookupState !== "")
             textFormat: Text.PlainText
             wrapMode: Text.Wrap
-            text: !root.serviceReady ? "" : root.service.lookupState === "searching" ? strings.t("location.searching")
+            text: !root.serviceReady ? "" : root.locationInvalid ? strings.t("location.invalid")
+              : root.service.lookupState === "searching" ? strings.t("location.searching")
               : root.service.lookupState === "notfound" ? strings.t("location.notFound").arg(root.service.lookupQuery)
               : strings.t("location.failed")
             color: Qt.darker(root.bar.foreground, 1.4)
@@ -701,8 +722,8 @@ Panel {
               if (found) {
                 root.editingLocation = false
                 keys.forceActiveFocus()
-              } else {
-                locationField.selectAll()
+              } else if (locationEditor.item) {
+                locationEditor.item.selectAll()
               }
             }
           }

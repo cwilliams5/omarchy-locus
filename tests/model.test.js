@@ -1558,3 +1558,53 @@ test("dimming doesn't jump where a short night's warm-up and clear-down cross", 
   }
   assert.strictEqual(previous, 100)
 })
+
+// ---- Marketplace review, omarchy-plugin-marketplace#15493 ---------------------------
+
+test("coordinates in degrees, minutes and seconds, or with N/S/E/W, are read here", () => {
+  const near = (a, b) => Math.abs(a - b) < 1e-6
+  const dms = Model.locationRequest("34°03'08\"N 118°14'37\"W")
+  assert.strictEqual(dms.kind, "coordinates")
+  assert.ok(near(dms.latitude, 34 + 3 / 60 + 8 / 3600) && near(dms.longitude, -(118 + 14 / 60 + 37 / 3600)))
+  assert.deepStrictEqual(Model.locationRequest("34 03 08 N, 118 14 37 W"), dms)
+  assert.deepStrictEqual(Model.locationRequest("34°03′08″N 118°14′37″W"), dms, "typographic primes")
+  assert.deepStrictEqual(Model.locationRequest("52.52N 13.40E"), { kind: "coordinates", latitude: 52.52, longitude: 13.4 })
+  assert.deepStrictEqual(Model.locationRequest("S 33.86, E 151.21"), { kind: "coordinates", latitude: -33.86, longitude: 151.21 })
+  assert.strictEqual(Model.locationRequest("34°3.13'N 118°14.62'W").kind, "coordinates", "degrees and decimal minutes")
+})
+
+test("nothing with a digit in it is ever sent to the city lookup", () => {
+  // A position the parser can't read must not leak to the geocoder as a "city".
+  for (const typed of ["34°03'08\" 118°14'37\"", "34°03'08\"N", "95°N 10°E", "34 03 61 N 118 14 37 W", "Berlin 10115",
+    "34.05,-118.24,12", "lat 34.05 lon -118.24", "34,05 118,24"])
+    assert.strictEqual(Model.locationRequest(typed), null, typed)
+  assert.deepStrictEqual(Model.locationRequest("St. John's"), { kind: "city", query: "St. John's" })
+})
+
+test("Sundown's file, copied into the private state file, becomes settings without its coordinates passing through the synced file", () => {
+  const sundown = { mode: "manual", manualOn: true, temperature: 2500, onTime: "20:00", latitude: 47.6, longitude: -122.3,
+    override: { on: false, until: at(2026, 11, 22, 7) }, autoLocation: true }
+  const loaded = Model.combineSettings(null, sundown)
+  assert.strictEqual(loaded.migrate, true)
+  assert.deepStrictEqual([loaded.settings.mode, loaded.settings.enabled, loaded.settings.temperature, loaded.settings.onTime],
+    ["always", true, 2500, "20:00"])
+  const parts = Model.splitSettings(loaded.settings)
+  assert.ok(!JSON.stringify(parts.settings).includes("47.6"), "no coordinates in the synced file")
+  assert.strictEqual(parts.state.latitude, 47.6)
+  // Once there are settings of its own, a setting in the state file is ignored again.
+  assert.strictEqual(Model.combineSettings({ temperature: 3000 }, { mode: "custom" }).settings.mode, "sun")
+})
+
+test("the panel's text field exists only while editing (Qt 6.12 clipboard reads)", () => {
+  // QTBUG-149610 / omarchy#15083: an editable field that exists makes the shell
+  // read the whole clipboard on every copy while its panel is open.
+  const qml = fs.readFileSync(path.join(__dirname, "..", "Panel.qml"), "utf8").split("\n")
+  const fields = qml.map((line, i) => /^\s*(TextField|TextInput|TextEdit|TextArea)\s*\{/.test(line) ? i : -1).filter((i) => i >= 0)
+  assert.ok(fields.length > 0)
+  for (const i of fields) {
+    const before = qml.slice(Math.max(0, i - 12), i).join("\n")
+    assert.ok(/Loader\s*\{[\s\S]*active:[^\n]*editingLocation[\s\S]*sourceComponent:\s*Component\s*\{\s*$/.test(before),
+      "line " + (i + 1) + ": an editable field outside a Loader that's active only while editing")
+  }
+})
+

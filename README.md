@@ -338,7 +338,10 @@ A city is looked up once, when you press Enter, with
 [Open-Meteo](https://open-meteo.com)'s geocoding service, which receives the
 name you typed and nothing else. The first place it finds is kept with its
 coordinates, so it isn't asked again; if it picks the wrong one, enter
-coordinates instead (like `52.52, 13.40`). Place names come from
+coordinates instead: `52.52, 13.40`, `52.52N 13.40E`, or degrees, minutes and
+seconds like `52°31'12"N 13°24'18"E`. Coordinates never leave your computer:
+anything you type with a digit in it is read here, and if it can't be read as
+coordinates it's refused rather than looked up. Place names come from
 [GeoNames](https://www.geonames.org) (CC BY 4.0).
 
 If none of these is available, Sun mode is warm whenever Locus is on, as in
@@ -424,8 +427,9 @@ beside it instead, so syncing your settings never syncs your location: whether
 Locus is on (`enabled`), any hold (`override`), the city or coordinates you
 entered, and the detected location. Locus keeps both files readable only by
 your account. If you used Sundown, Locus copies its settings
-(`heliotrope.json`) once, the first time it runs, and sorts them into the two
-files.
+(`heliotrope.json`) once, the first time it runs, into the private
+`locus-state.json`, and sorts them into the two files from there, so Sundown's
+coordinates never pass through the file you sync.
 
 ## Show it with Omarchy's indicators
 

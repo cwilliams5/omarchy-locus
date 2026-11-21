@@ -130,6 +130,15 @@ function combineSettings(settingsRaw, stateRaw) {
   var migrate = Object.keys(stray).length > 0
   for (var key in stray)
     if (!Object.prototype.hasOwnProperty.call(state, key)) state[key] = stray[key]
+  // Settings found in the state file while the settings file is empty: the
+  // first run copies Sundown's single file into the state file (the private
+  // one), so its coordinates never pass through the file people sync. Taken
+  // as the settings, then split. Otherwise each key is read only from its home.
+  var strayChoices = pickKeys(stateRaw, SETTING_KEYS)
+  if (Object.keys(chosen).length === 0 && Object.keys(strayChoices).length > 0) {
+    chosen = strayChoices
+    migrate = true
+  }
   // Before Locus had its own on/off switch, Manual mode's switch (manualOn)
   // said whether the screen was warm. Manual becomes Always, and Locus is on
   // only if that switch was; in Sun and Custom modes it's on.
@@ -317,10 +326,37 @@ function normalizeSettings(raw) {
 
 // "52.52, 13.40", as typed into the panel. Null when it isn't a place on Earth.
 function parseCoordinates(text) {
-  var match = /^\s*(-?\d+(?:\.\d+)?)[\s,]+(-?\d+(?:\.\d+)?)\s*$/.exec(String(text))
-  if (!match) return null
-  var latitude = Number(match[1])
-  var longitude = Number(match[2])
+  var raw = String(text === undefined || text === null ? "" : text).trim()
+  var match = /^(-?\d+(?:\.\d+)?)[\s,]+(-?\d+(?:\.\d+)?)$/.exec(raw)
+  if (match) return checkedPlace(Number(match[1]), Number(match[2]))
+  // Degrees, minutes and seconds, or decimal degrees, with hemisphere
+  // letters: 34°03'08"N 118°14'37"W, 34 3 8 N, 118 14 37 W, 52.52N 13.40E,
+  // S 33.86 E 151.21. The letters say which is which and the sign.
+  var plain = raw.toUpperCase().replace(/[\u00b0\u00ba\u02da\u2032\u2019'\u2033\u201d"]/g, " ")
+  var parts = /^([NS])?\s*([\d.\s]+?)\s*([NS])?\s*,?\s*([EW])?\s*([\d.\s]+?)\s*([EW])?$/.exec(plain)
+  if (!parts) return null
+  var north = parts[1] || parts[3]
+  var east = parts[4] || parts[6]
+  if (!north || !east || (parts[1] && parts[3]) || (parts[4] && parts[6])) return null
+  var latitude = sexagesimal(parts[2])
+  var longitude = sexagesimal(parts[5])
+  return checkedPlace(north === "S" ? -latitude : latitude, east === "W" ? -longitude : longitude)
+}
+
+// "34 03 08.5" as degrees: up to three numbers, minutes and seconds under 60.
+function sexagesimal(text) {
+  var numbers = String(text).match(/\d+(?:\.\d+)?/g)
+  if (!numbers || numbers.length > 3) return NaN
+  var value = 0
+  for (var i = 0; i < numbers.length; i++) {
+    var number = Number(numbers[i])
+    if (i > 0 && number >= 60) return NaN
+    value += number / Math.pow(60, i)
+  }
+  return value
+}
+
+function checkedPlace(latitude, longitude) {
   return isLatitude(latitude) && isLongitude(longitude) ? { latitude: latitude, longitude: longitude } : null
 }
 
@@ -333,9 +369,10 @@ function locationRequest(text) {
   if (typed === "") return { kind: "clear" }
   var place = parseCoordinates(typed)
   if (place) return { kind: "coordinates", latitude: place.latitude, longitude: place.longitude }
-  // Something that looks like numbers but isn't a place on Earth is a typo,
-  // not a city.
-  if (/^[\s\d.,+-]+$/.test(typed)) return null
+  // Anything with a digit is a position (or a typo in one), never a city: it
+  // must not go to the online lookup, whatever its format (marketplace review,
+  // omarchy-plugin-marketplace#15493).
+  if (/\d/.test(typed)) return null
   if (typed.length > CITY_MAX || /[\u0000-\u001f\u007f-\u009f]/.test(typed)) return null
   return { kind: "city", query: typed }
 }
