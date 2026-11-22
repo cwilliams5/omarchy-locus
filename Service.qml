@@ -143,6 +143,12 @@ Item {
   }
   property var sunsetQueue: []
   property var sunsetCurrent: null
+  // The last look found hyprsunset not running (no socket, or a stale one).
+  // That's normal: Omarchy starts it on demand, and Locus only when it needs
+  // a tint. While it's down and not needed, Locus stops looking and watches
+  // its socket file instead (hyprsunset makes a new one when it starts): a
+  // failed connection makes Quickshell log a warning, once a minute, all day.
+  property bool sunsetDown: false
   property real lastStartAttempt: 0
   property bool shaderQueued: false
   // The step warm-shader.sh last applied, and the one it is applying now. -1
@@ -606,7 +612,14 @@ Item {
     sunsetSocket.connected = true
   }
 
+  function sunsetStarted() {
+    if (!sunsetDown) return
+    sunsetDown = false
+    tick()
+  }
+
   function sunsetSocketReady() {
+    sunsetDown = false
     if (!sunsetCurrent || sunsetCurrent.viaHyprctl) return
     sunsetSocket.write(sunsetCurrent.args.join(" "))
     sunsetSocket.flush()
@@ -673,7 +686,9 @@ Item {
     fadeOutNow = Math.round(lengths.outMs / 60000)
     // Look first; step() decides what to send once hyprsunset has answered. A
     // look already under way, or the one that follows a send, does the same.
-    if (!probeBusy && !applyBusy) startProbe()
+    // While hyprsunset is down and not needed, the socket watch below wakes us.
+    var idleDown = sunsetDown && currentLevel() === Model.OFF_TEMP && !previewing && !applyBusy
+    if (!probeBusy && !applyBusy && !idleDown) startProbe()
     syncShader()
     scheduleNext(now)
   }
@@ -1028,9 +1043,22 @@ Item {
       if (!root.sunsetCurrent || root.sunsetCurrent.viaHyprctl) return
       // Refused (0) or no socket (2): hyprsunset isn't running, and hyprctl
       // would only say the same. Anything else: try hyprctl.
-      if (error === 0 || error === 2) root.sunsetFinish("")
-      else root.sunsetFallback()
+      if (error === 0 || error === 2) {
+        root.sunsetDown = true
+        root.sunsetFinish("")
+      } else {
+        root.sunsetFallback()
+      }
     }
+  }
+
+  // hyprsunset (re)creates its socket when it starts: look again then.
+  FileView {
+    path: root.sunsetSocketPath
+    watchChanges: true
+    printErrors: false
+    onFileChanged: root.sunsetStarted()
+    onLoaded: root.sunsetStarted()
   }
 
   Process {

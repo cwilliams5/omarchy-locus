@@ -91,7 +91,9 @@ preview.png        the marketplace listing card (a smaller copy of media/hero.pn
    what to send (`step`). Sending first let a fade step overwrite a change
    made elsewhere (Omarchy's toggle) before Locus had seen it.
 2. **Never sleep longer than `Model.CHECK_MS` (60 s), and don't poll faster
-   than needed.** `scheduleNext` wakes for whatever `Model.nextDueAt` says is
+   than needed.** (One exception: while hyprsunset isn't running and no tint
+   is needed, the socket file's watch replaces the looks; see the platform
+   facts.) `scheduleNext` wakes for whatever `Model.nextDueAt` says is
    due (a switch, the clear-down starting, the next visible fade step, a hold
    ending, just after a `hyprsunset.conf` switch time), 5 s while the panel
    is open, 1 s only while hyprsunset is starting. The fork began at a fixed
@@ -216,6 +218,14 @@ Quickshell 0.3.2.
   the server to close hangs). About 0.1 ms against 9 ms for a `hyprctl`
   process; in normal running Locus starts no processes. If the socket errors
   or is silent for 2 s, that one request goes through `hyprctl` instead.
+- **hyprsunset is often not running,** and that's normal: Omarchy 4.5 doesn't
+  start it at login (its toggle starts it on demand), and Locus starts it only
+  when it needs a tint. A failed connection makes Quickshell log a warning,
+  and the socket file can be stale after hyprsunset is killed (connection
+  refused). So when a look finds it down and no tint is needed, Locus stops
+  looking (`sunsetDown`) and watches the socket file, which hyprsunset
+  recreates when it starts. Measured 2026-11-21: one warning when it goes
+  down, then none; Locus sees it start again within about 2 s.
   Re-check this after hyprsunset updates (it's hyprctl's protocol, not a
   documented API).
 - `hyprctl hyprsunset temperature [K]`, `identity`, `gamma`. Even 6500K tints
@@ -276,7 +286,11 @@ Quickshell 0.3.2.
   follows the day" test assumes New York and fails in Asia/Tokyo (inherited).
 - `omarchy plugin validate .` checks the manifest.
 - To try a branch live: `git -C ~/.config/omarchy/plugins/io.github.cwilliams5.locus fetch ~/Work/omarchy-locus <branch>`,
-  check out `FETCH_HEAD`, `omarchy restart shell`. Afterwards put it back on
+  check out `FETCH_HEAD`, `omarchy restart shell`. **The restart is not
+  optional:** changing the files makes the shell reload the plugin by itself
+  ("Local plugin changed, reloading"), but with the QML it already compiled,
+  so a test without the restart tests the old code (2026-11-21: a fix looked
+  broken, and debug lines never appeared, until the shell was restarted). Afterwards put it back on
   `main` and `omarchy plugin update`. QML already loaded stays cached, so
   always restart the shell after changing it.
 - Status: `omarchy-shell io.github.cwilliams5.locus.control status` (includes
