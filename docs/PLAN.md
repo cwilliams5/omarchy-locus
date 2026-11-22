@@ -22,15 +22,17 @@ in the same commit as the work.
 
 ## Where things stand (update this when you stop)
 
-- **2026-11-19, end of session 1:** A1, A2, B1 done, merged, pushed, tested
-  live; the installed copy is on `main`; dotfiles updated.
-- **2026-11-19/20, session 2:** phase B done (B8 skipped), plus B11, the
-  on/off switch. **Next: Cody validates B11, then D1 (go-public stage 4).**
-- Cody's live Locus state at that point: Sun mode, 3000K, and a hold "off
-  until morning" (ends at sunrise, 6:30 AM on 2026-11-20). If a test changes
-  the hold at night, put it back with
-  `omarchy-shell io.github.cwilliams5.locus.control morning`; after sunrise
-  the hold has ended by itself and there's nothing to restore.
+- **2026-11-22: released and listed on the marketplace** (#15493,
+  approved-and-verified at 25ff262). Every phase is done (B8 and phase C
+  skipped by Cody's decision); v2.0.0 is public; fixes since the tag are
+  fb8763a and 25ff262. For what's next (2.0.1 and its verification request,
+  the 2.1 quirk), see CLAUDE.md's "Status". Earlier session notes are in the
+  status list below.
+- Cody's own Locus settings are tracked in his dotfiles
+  (`home/dot_local/state/omarchy/settings/private_locus.json`); his state
+  file (holds, location) is not. Tests that change his settings: save both
+  files first and restore them byte for byte by writing a temp file and
+  renaming it over (never `cat >`), or through the IPC commands.
 
 ## Ground rules for every item
 
@@ -446,4 +448,5 @@ selling point, with a battery section in the README).
       marketplace issue (approved; maintainer notes updated for the socket and fork), old fork notice
       (2026-11-20: public; v2.0.0 at e590349; install test PASS from the public URL;
       omacom/omarchy-plugin-marketplace#15493; old fork 936e08e)
-- [ ] Remind Cody: upload media/social-preview.png in Settings
+- [x] Remind Cody: upload media/social-preview.png in Settings (done 2026-11-20)
+- [x] Listed on the marketplace 2026-11-22 (#15493, approved-and-verified at 25ff262)

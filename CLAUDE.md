@@ -71,6 +71,7 @@ Model.js           all the logic that can be tested: sun times, schedules,
 Service.qml        the one part that talks to hyprsunset: checks, decides,
                    sends, holds, pausing, the IPC commands
 Panel.qml          the bar icon and its panel
+Status.js          the status line and tooltip text, shared by Panel.qml and Indicator.qml
 ArcIcon.qml        the Locus mark drawn in QML, for the bar icon and the panel header
 Indicator.qml      optional: the icon among Omarchy's indicators instead
 Registry.js        hands the service to widgets under replacement bars
@@ -309,8 +310,13 @@ Quickshell 0.3.2.
 1. Bump `version` in `manifest.json`; tests and `omarchy plugin validate .`
    pass; README up to date.
 2. Privacy scan, commit, push.
-3. Once listed on the marketplace: its "Plugin verification" issue form with
-   the full commit SHA (see the go-public skill's `omarchy.md`).
+3. `gh release create vX.Y.Z` with notes Cody has approved.
+4. The marketplace: its "Plugin verification" issue form with the full
+   40-character commit SHA (see the go-public skill's `omarchy.md`; the
+   ship-update skill walks through it).
+5. Before a public release, the go-public skill's checks: the privacy scan
+   last, an independent review by a fresh agent, and the marketplace's own
+   security baseline run offline.
 
 ## Voice and conventions
 
@@ -318,35 +324,44 @@ Plain, practical, Windows terms where they help, no hype, no emoji. See
 `branding/BRANDING.md` for the project's own voice notes (no health claims;
 temperatures as `3000K`). Commit messages say what changed and why.
 
-## Status and open ideas (2026-11-20)
+## Status and open ideas (2026-11-23)
 
-The go-public run (Cody's skill) has done naming, logo and branding, and is
-**paused for development**. **The working plan, with designs, order and a
-status list, is `docs/PLAN.md`: read it before starting work.** After the
-features: the README with screenshots, publishing (the repo is private until
-then), and the marketplace.
+**Released and public.** v2.0.0 (tag on e590349, 2026-11-20); the history of
+how it got here is `docs/PLAN.md`. The go-public run (Cody's skill) is done;
+its candid trial log is `~/Work/go-public-trials/sundown.md` (outside the
+repo).
 
-Done in the development phase: settings and state in two files, finer
-rounding for deep red, timed holds, presets and Movie mode, the bedtime
-level, late-night dimming, the Arc mark as the bar icon, the 24-hour view,
-twilight fades, location by city name, commands at sunset and sunrise, and
-the header switch as Locus on/off.
+**Marketplace: listed 2026-11-22** (omacom/omarchy-plugin-marketplace#15493,
+closed approved-and-verified at 25ff262; category Appearance; tags bar,
+hyprland, quickshell). The reviewer (HANCORE-linux) reads every file and
+cites file:line. Round 1 found a Medium (coordinates in
+degrees/minutes/seconds sent to the geocoder) and a Low (Sundown's import
+passing through the synced file): fixed in fb8763a. Then 25ff262 (quiet
+while hyprsunset isn't running).
+- Any commit after 25ff262 shows as "Update unverified" on the listing until
+  a "Plugin verification" request (the issue form, full 40-character SHA)
+  is approved. Docs-only commits can wait for the next release. Every issue
+  and reply is public: show Cody the exact text first.
 
-Decided on 2026-11-20: no daytime tint (B8), none of the heavier features
-(screen effects, ambient light sensor, calls, per-monitor, smart bulbs) for
-now, and the header switch became Locus on/off (B11). Next: Cody validates
-that, then go-public resumes at stage 4.
+**Next release: 2.0.1** (fixes since the tag: fb8763a, 25ff262). Bump
+`manifest.json`, release notes, then the Plugin verification form.
 
-2026-11-20 overnight: go-public stage 4 done (README, media), and stages 5
-and 6 prepared but not done: making the repo public, the v2.0.0 release and
-the marketplace issue all wait for Cody's go on the exact text (drafts kept
-outside the repo). `preview.png` at the root is the marketplace card.
+**Known, for 2.1:** a slider preview can be undone when hyprsunset has just
+started (a shell start, or Locus starting hyprsunset for it): the restart
+branch in `handleProbe` (reading `FRESH_TEMP`) applies `currentLevel()`,
+which ignores `previewing`. Likely fix: apply `applyTarget` while
+previewing. Not a problem for the schedule itself.
 
-When Locus goes public, point the old fork's README at it.
+**Upstream:** hyprsunset's 100K rounding is reported as hyprwm/hyprsunset#103
+(the README's Known limits link it); when it's fixed, update that limit.
+
+**Decided, don't re-open without Cody:** no daytime tint (B8); none of the
+heavier features (screen effects, ambient light sensor, calls, per-monitor,
+smart bulbs); the header switch is Locus on/off (B11).
 
 ## Distribution
 
-The Omarchy plugin marketplace, once public: it's a shell plugin, so users
-install it with `omarchy plugin add https://github.com/cwilliams5/omarchy-locus.git --enable`.
+The Omarchy plugin marketplace (submitted 2026-11-20 as #15493, listed
+2026-11-22): it's a shell plugin, so users install it with `omarchy plugin add https://github.com/cwilliams5/omarchy-locus.git --enable`.
 No `git clone` install alternative in the README: the marketplace's security
 baseline flags it.
